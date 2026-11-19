@@ -13,10 +13,29 @@ namespace UI {
 namespace {
 enum { E_START=1,E_FILES=2,E_SETTINGS=3,E_QUIT=4,E_BACK=5,E_PREV=6,E_NEXT=7,E_UP=8,E_ROW=20,ROWS=5,MAX_ENTRIES=64,NAME_LEN=128,PATH_LEN=256 };
 class EventDialog:public GUIDialog{
-public:explicit EventDialog(const char*t):GUIDialog(Height95,AlignCenter,t,KeyboardStateNone),event(0){}
+ struct ButtonBinding{void*element;int id;};
+ ButtonBinding buttons[12];
+ int buttonCount;
+ int event;
+public:
+ explicit EventDialog(const char*t):GUIDialog(Height95,AlignCenter,t,KeyboardStateNone),buttonCount(0),event(0){}
  int EventID()const{return event;}
- int OnEvent(GUIDialog_Wrapped*d,GUIDialog_OnEvent_Data*e)override{if(e)event=e->GetEventID();return GUIDialog::OnEvent(d,e);}
-private:int event;
+ void RegisterButton(GUIButton&button,int id){
+  if(buttonCount>=12)return;
+  buttons[buttonCount].element=button.GetWrapped<void>();
+  buttons[buttonCount].id=id;
+  ++buttonCount;
+ }
+ int OnEvent(GUIDialog_Wrapped*d,GUIDialog_OnEvent_Data*e)override{
+  if(e&&e->GetEventID()==GUIDialog::DialogResultOK){
+   for(int i=0;i<buttonCount;++i){
+    if(buttons[i].element==e->element){event=buttons[i].id;break;}
+   }
+  }
+  // DialogResultOK is deliberately assigned to every registered button.
+  // Let the SDK's original handler close the dialog and return that result.
+  return GUIDialog::OnEvent(d,e);
+ }
 };
 class Elements{
  void*mem[12];int used;
@@ -24,7 +43,7 @@ public:Elements():used(0){}
  ~Elements(){for(int i=0;i<used;++i)free(mem[i]);}
  void AddButton(EventDialog&d,uint16_t x,uint16_t y,uint16_t r,uint16_t b,const char*t,int id,bool enabled=true){
   if(used>=12)return;void*p=malloc(sizeof(GUIButton));if(!p)return;
-  GUIButton*q=new(p)GUIButton(x,y,r,b,t,(uint16_t)id,enabled?GUIButton::FlagEnabled:0);mem[used++]=p;d.AddElement(*q);
+  GUIButton*q=new(p)GUIButton(x,y,r,b,t,(uint16_t)GUIDialog::DialogResultOK,enabled?GUIButton::FlagEnabled:0);mem[used++]=p;d.AddElement(*q);d.RegisterButton(*q,id);
  }
  void AddLabel(EventDialog&d,int x,int y,const char*t){
   if(used>=12)return;void*p=malloc(sizeof(GUILabel));if(!p)return;
