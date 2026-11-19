@@ -74,12 +74,19 @@ static void ShowTextFile(const char *path) {
     Debug_PrintString(path, false);
     Debug_SetCursorPosition(0, 3);
 
+    struct stat fileStat;
+    int statResult = stat(path, &fileStat);
+
     int fd = open(path, OPEN_READ);
     if (fd < 0) {
         Debug_SetCursorPosition(0, 4);
-        Debug_Printf(0, 4, true, 0, "open() error: %d", fd);
-        Debug_SetCursorPosition(0, 6);
-        Debug_PrintString("Check path / file location.", false);
+        Debug_Printf(0, 4, true, 0, "stat() result: %d", statResult);
+        Debug_SetCursorPosition(0, 5);
+        Debug_Printf(0, 5, true, 0, "open() result: %d", fd);
+        if (statResult == 0) {
+            Debug_SetCursorPosition(0, 6);
+            Debug_Printf(0, 6, true, 0, "File size: %lu bytes", (unsigned long)fileStat.fileSize);
+        }
         Debug_SetCursorPosition(0, 8);
         Debug_PrintString("Press any key to return.", false);
         LCD_Refresh();
