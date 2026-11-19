@@ -274,7 +274,7 @@ void Join(const char *dir, const char *name, char *out, int cap) {
     Append(out, name, cap);
 }
 void Parent(char *p) {
-    const char *root = "\\\\fls0\\";
+    const char *root = "\\fls0\\";
     int rootn = Len(root), n = Len(p);
     if (n <= rootn)
         return;
@@ -332,7 +332,7 @@ void Adjust(Setting &s, Application &a) {
     }
 }
 } // namespace
-Application::Application(const Config &c) : m_config(c), m_state(StateMainMenu), m_lifecycleStarted(false) { Copy(m_currentDirectory, "\\\\fls0\\", sizeof(m_currentDirectory)); }
+Application::Application(const Config &c) : m_config(c), m_state(StateMainMenu), m_lifecycleStarted(false) { Copy(m_currentDirectory, "\\fls0\\", sizeof(m_currentDirectory)); }
 Application::~Application() {
     if (m_lifecycleStarted && m_config.manageCalculatorLifecycle) {
         calcEnd();
