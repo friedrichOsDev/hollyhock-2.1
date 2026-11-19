@@ -25,7 +25,7 @@ calculator-test: $(SDK_DIR)/sdk.o $(UI_DIR)/ui.o start.o calculator_api_test.o
 $(SDK_DIR)/sdk.o:
 	$(MAKE) -C $(SDK_DIR)
 $(UI_DIR)/ui.o:
-	$(MAKE) -C $(UI_DIR) SDK_DIR=$(SDK_DIR)
+	$(MAKE) -C $(UI_DIR) SDK_DIR=../sdk
 start.o: start.s
 	$(AS) $< -o $@
 calculator_api_test.o: calculator_api_test.cpp

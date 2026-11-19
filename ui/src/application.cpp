@@ -4,7 +4,11 @@
 #include <sdk/os/file.hpp>
 #include <sdk/os/mem.hpp>
 #include <stdint.h>
-#include <new>
+#include <stddef.h>
+
+// Minimal placement-new support for this freestanding toolchain.
+inline void *operator new(size_t, void *memory) noexcept { return memory; }
+inline void operator delete(void *, void *) noexcept {}
 namespace UI {
 namespace {
 enum { E_START=1,E_FILES=2,E_SETTINGS=3,E_QUIT=4,E_BACK=5,E_PREV=6,E_NEXT=7,E_UP=8,E_ROW=20,ROWS=5,MAX_ENTRIES=64,NAME_LEN=128,PATH_LEN=256 };
