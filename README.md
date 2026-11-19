@@ -1,3 +1,9 @@
+# Hollyhock 2.1
+My (**friedrichOsDev**) fork of the Hollyhock 2 SDK is mainly intended to include some SDK quality-of-life features and bug fixes.
+I named it Hollyhock 2.1, even though it's not really a new version.
+
+# Original README
+
 This is a __fork__ of the original hollyhock launcher by The6P4C (https://github.com/Stellaris-code/hollyhock-fork/).
 My intention was to modify it a little. I changed the following things:
 - BIN:       I added the ability to load prograrms from binary files instead of .hhk files, the extrypoint is the start of the file and the load location is somwhere in the file,
