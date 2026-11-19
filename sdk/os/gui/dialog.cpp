@@ -13,7 +13,7 @@ GUIDialog::GUIDialog(
 	enum Height height, enum Alignment alignment,
 	const char* title,
 	enum KeyboardState keyboard
-) : m_vtable({}) {
+) : m_oldVTable(nullptr), m_vtable({}) {
 	m_wrapped = GUIDialog_ctor(
 		0,
 		height, alignment,
@@ -22,20 +22,41 @@ GUIDialog::GUIDialog(
 		keyboard
 	);
 
-	// Save the old vtable
+	if (!m_wrapped)
+		return;
 	m_oldVTable = GetWrapped<GUIDialog_Wrapped>()->vtable;
-
-	// Copy the pre-existing vtable
-	memcpy(&m_vtable, GetWrapped<GUIDialog_Wrapped>()->vtable, sizeof(m_vtable));
-
+	if (!m_oldVTable)
+		return;
+	memcpy(&m_vtable, m_oldVTable, sizeof(m_vtable));
 	m_vtable.me = this;
 	m_vtable.OnEvent.func = reinterpret_cast<decltype(m_vtable.OnEvent.func)>(OnEvent_Wrap);
+}
 
-	GetWrapped<GUIDialog_Wrapped>()->vtable = &m_vtable;
+
+GUIDialog::~GUIDialog() {
+	RestoreVTable();
+}
+
+void GUIDialog::InstallVTable() {
+	if (!m_wrapped || !m_oldVTable)
+		return;
+	GUIDialog_Wrapped *native = GetWrapped<GUIDialog_Wrapped>();
+	if (native->vtable == m_oldVTable)
+		native->vtable = &m_vtable;
+}
+
+void GUIDialog::RestoreVTable() {
+	if (!m_wrapped || !m_oldVTable)
+		return;
+	GUIDialog_Wrapped *native = GetWrapped<GUIDialog_Wrapped>();
+	if (native->vtable == &m_vtable)
+		native->vtable = m_oldVTable;
 }
 
 int GUIDialog::OnEvent_Wrap(struct GUIDialog_Wrapped *dialog, struct GUIDialog_OnEvent_Data *event) {
 	// Call the OnEvent function of our class (not of CASIO's one!)
+	if (!dialog || !dialog->vtable || !dialog->vtable->me)
+		return 0;
 	return dialog->vtable->me->OnEvent(dialog, event);
 }
 
@@ -46,6 +67,8 @@ int GUIDialog::OnEvent(struct GUIDialog_Wrapped *dialog, struct GUIDialog_OnEven
 	// actual base OnEvent method, we use the old vtable we backed up in the
 	// constructor.
 	(void)dialog;
+	if (!m_oldVTable || !m_oldVTable->OnEvent.func)
+		return 0;
 	return m_oldVTable->OnEvent(m_wrapped, event);
 }
 
@@ -91,17 +114,18 @@ uint16_t GUIDialog::GetBottomY() {
  * @param element The GUI element to add.
  */
 void GUIDialog::AddElement(GUIElement &element) {
-	GetWrapped<GUIDialog_Wrapped>()->vtable->AddElement(
-		m_wrapped,
-		element.GetWrapped<void>(), 1
-	);
+	if (!m_wrapped || !m_vtable.AddElement.func)
+		return;
+	m_vtable.AddElement(m_wrapped, element.GetWrapped<void>(), 0);
 }
 
 /**
  * Refreshes the dialog, redrawing all components.
  */
 void GUIDialog::Refresh() {
-	GetWrapped<GUIDialog_Wrapped>()->vtable->Refresh(m_wrapped);
+	if (!m_wrapped || !m_vtable.Refresh.func)
+		return;
+	m_vtable.Refresh(m_wrapped);
 }
 
 /**
@@ -110,7 +134,10 @@ void GUIDialog::Refresh() {
  * @return The result of the dialog.
  */
 GUIDialog::DialogResult GUIDialog::ShowDialog() {
-	return static_cast<GUIDialog::DialogResult>(
-		GetWrapped<GUIDialog_Wrapped>()->vtable->ShowDialog(m_wrapped)
-	);
+	if (!m_wrapped || !m_vtable.ShowDialog.func)
+		return DialogResultCancel;
+	InstallVTable();
+	DialogResult result = static_cast<DialogResult>(m_vtable.ShowDialog(m_wrapped));
+	RestoreVTable();
+	return result;
 }
