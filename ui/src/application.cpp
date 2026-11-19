@@ -1,5 +1,5 @@
 #include <sdk/calc/calc.hpp>
-#include <sdk/os/file.hpp>
+#include <ui/filesystem.hpp>
 #include <sdk/os/gui.hpp>
 #include <sdk/os/debug.hpp>
 #include <sdk/os/lcd.hpp>
@@ -235,32 +235,19 @@ void ClearLoadingMessage() {
 }
 void Scan(const char *dir, const Config &cfg, Entry *e, int *count) {
     *count = 0;
-    wchar_t search[PATH_LEN];
-    AsciiToWide(dir, search, PATH_LEN);
-    int n = Len(dir);
-    if (n + 2 >= PATH_LEN)
+    Directory directory;
+    if (directory.Open(dir) < 0)
         return;
-    search[n] = L'*';
-    search[n + 1] = 0;
-    int handle = -1;
-    wchar_t name[NAME_LEN];
-    findInfo info;
-    int result = findFirst(search, &handle, name, &info);
-    if (result < 0)
-        return;
-    while (result == 0) {
-        char narrow[NAME_LEN];
-        WideToAscii(name, narrow, sizeof(narrow));
-        bool skip = Equal(narrow, ".") || Equal(narrow, "..");
-        bool directory = info.type == findInfo::EntryTypeDirectory;
-        if (!skip && (directory || FileFilterMatches(narrow, cfg.filters, cfg.filterCount)) && *count < MAX_ENTRIES) {
-            Copy(e[*count].name, narrow, NAME_LEN);
-            e[*count].dir = directory;
+    DirectoryEntry item;
+    while (directory.Next(&item) == 0) {
+        bool skip = Equal(item.name, ".") || Equal(item.name, "..");
+        if (!skip && (item.isDirectory || FileFilterMatches(item.name, cfg.filters, cfg.filterCount)) && *count < MAX_ENTRIES) {
+            Copy(e[*count].name, item.name, NAME_LEN);
+            e[*count].dir = item.isDirectory;
             ++*count;
         }
-        result = findNext(handle, name, &info);
     }
-    findClose(handle);
+    directory.Close();
     Sort(e, *count);
 }
 void Bounds(GUIDialog &d, int row, uint16_t *x, uint16_t *y, uint16_t *r, uint16_t *b) {
