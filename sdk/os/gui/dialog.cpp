@@ -78,7 +78,7 @@ int GUIDialog::OnEvent(struct GUIDialog_Wrapped *dialog, struct GUIDialog_OnEven
  * @return The X position of the left edge of the dialog body, in pixels.
  */
 uint16_t GUIDialog::GetLeftX() {
-	return GetWrapped<GUIDialog_Wrapped>()->leftX;
+	return m_wrapped ? GetWrapped<GUIDialog_Wrapped>()->leftX : 0;
 }
 
 /**
@@ -87,7 +87,7 @@ uint16_t GUIDialog::GetLeftX() {
  * @return The Y position of the top edge of the dialog body, in pixels.
  */
 uint16_t GUIDialog::GetTopY() {
-	return GetWrapped<GUIDialog_Wrapped>()->topY;
+	return m_wrapped ? GetWrapped<GUIDialog_Wrapped>()->topY : 0;
 }
 
 /**
@@ -96,7 +96,7 @@ uint16_t GUIDialog::GetTopY() {
  * @return The X position of the right edge of the dialog body, in pixels.
  */
 uint16_t GUIDialog::GetRightX() {
-	return GetWrapped<GUIDialog_Wrapped>()->rightX;
+	return m_wrapped ? GetWrapped<GUIDialog_Wrapped>()->rightX : 0;
 }
 
 /**
@@ -105,7 +105,7 @@ uint16_t GUIDialog::GetRightX() {
  * @return The Y position of the bottom edge of the dialog body, in pixels.
  */
 uint16_t GUIDialog::GetBottomY() {
-	return GetWrapped<GUIDialog_Wrapped>()->bottomY;
+	return m_wrapped ? GetWrapped<GUIDialog_Wrapped>()->bottomY : 0;
 }
 
 /**
@@ -116,7 +116,7 @@ uint16_t GUIDialog::GetBottomY() {
 void GUIDialog::AddElement(GUIElement &element) {
 	if (!m_wrapped || !m_vtable.AddElement.func)
 		return;
-	m_vtable.AddElement(m_wrapped, element.GetWrapped<void>(), 0);
+	m_vtable.AddElement(m_wrapped, element.GetWrapped<void>(), 1);
 }
 
 /**
