@@ -45,6 +45,7 @@ int GUIDialog::OnEvent(struct GUIDialog_Wrapped *dialog, struct GUIDialog_OnEven
 	// redirects to this method. Since we've done that, if we want to call the
 	// actual base OnEvent method, we use the old vtable we backed up in the
 	// constructor.
+	(void)dialog;
 	return m_oldVTable->OnEvent(m_wrapped, event);
 }
 
