@@ -15,14 +15,7 @@ enum { E_START=1,E_FILES=2,E_SETTINGS=3,E_QUIT=4,E_BACK=5,E_PREV=6,E_NEXT=7,E_UP
 class EventDialog:public GUIDialog{
 public:explicit EventDialog(const char*t):GUIDialog(Height95,AlignCenter,t,KeyboardStateNone),event(0){}
  int EventID()const{return event;}
- int OnEvent(GUIDialog_Wrapped*d,GUIDialog_OnEvent_Data*e)override{
-  if(!e)return GUIDialog::OnEvent(d,e);
-  event=e->GetEventID();
-  // Custom UI buttons should close the dialog so ShowDialog() returns.
-  // The caller then dispatches the captured event ID.
-  if(event!=0)return DialogResultOK;
-  return GUIDialog::OnEvent(d,e);
- }
+ int OnEvent(GUIDialog_Wrapped*d,GUIDialog_OnEvent_Data*e)override{if(e)event=e->GetEventID();return GUIDialog::OnEvent(d,e);}
 private:int event;
 };
 class Elements{
