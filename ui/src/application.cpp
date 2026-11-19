@@ -213,17 +213,22 @@ void Sort(Entry *e, int n) {
     }
 }
 void ShowLoadingMessage() {
+    // A small framed status panel on the debug LCD while the directory scan runs.
     Debug_SetCursorPosition(0, 0);
-    Debug_PrintString("Loading directory...", false);
+    Debug_PrintString("+--------------------+", false);
     Debug_SetCursorPosition(0, 1);
-    Debug_PrintString("Please wait.", false);
+    Debug_PrintString("|  Scanning files... |", false);
+    Debug_SetCursorPosition(0, 2);
+    Debug_PrintString("|    Please wait.    |", false);
+    Debug_SetCursorPosition(0, 3);
+    Debug_PrintString("+--------------------+", false);
     LCD_Refresh();
 }
 void ClearLoadingMessage() {
-    Debug_SetCursorPosition(0, 0);
-    Debug_PrintString("                        ", false);
-    Debug_SetCursorPosition(0, 1);
-    Debug_PrintString("                        ", false);
+    for (int row = 0; row < 4; ++row) {
+        Debug_SetCursorPosition(0, row);
+        Debug_PrintString("                        ", false);
+    }
     LCD_Refresh();
 }
 void Scan(const char *dir, const Config &cfg, Entry *e, int *count) {
