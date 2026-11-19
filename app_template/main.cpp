@@ -76,8 +76,11 @@ static void ShowTextFile(const char *path) {
 
     int fd = open(path, OPEN_READ);
     if (fd < 0) {
-        Debug_PrintString("Could not open file.", false);
+        Debug_SetCursorPosition(0, 4);
+        Debug_Printf(0, 4, true, 0, "open() error: %d", fd);
         Debug_SetCursorPosition(0, 6);
+        Debug_PrintString("Check path / file location.", false);
+        Debug_SetCursorPosition(0, 8);
         Debug_PrintString("Press any key to return.", false);
         LCD_Refresh();
         WaitForKeyPress();
