@@ -109,7 +109,8 @@ void Application::RunMainMenu(){
 void Application::RunFileSelector(){
  Entry*entries=(Entry*)malloc(sizeof(Entry)*MAX_ENTRIES);if(!entries){ReturnToMenu();return;}int count=0;Scan(m_currentDirectory,m_config,entries,&count);int page=0;bool done=false;
  while(!done&&m_state==StateFileSelector){Elements el;EventDialog d("Select file");PathLabel(el,d,m_currentDirectory);int pages=(count+ROWS-1)/ROWS;if(page>=pages&&pages>0)page=pages-1;if(page<0)page=0;
-  for(int row=0;row<ROWS;++row){int index=page*ROWS+row;if(index<count){char label[NAME_LEN+3];Copy(label,entries[index].name,sizeof(label));if(entries[index].dir)Append(label,"/",sizeof(label));Button(el,d,row+1,label,E_ROW+row);}else Button(el,d,row+1," ",E_ROW+row,false);}
+  int visible=count-page*ROWS;if(visible>ROWS)visible=ROWS;
+  for(int row=0;row<visible;++row){int index=page*ROWS+row;char label[NAME_LEN+3];Copy(label,entries[index].name,sizeof(label));if(entries[index].dir)Append(label,"/",sizeof(label));Button(el,d,row+1,label,E_ROW+row);}
   Bottom(el,d,8,38,"<",E_PREV);Bottom(el,d,50,38,">",E_NEXT);Bottom(el,d,92,56,"Up",E_UP);Bottom(el,d,152,60,"Back",E_BACK);
   d.ShowDialog();int event=d.EventID();if(event==E_BACK){ReturnToMenu();done=true;}else if(event==E_UP){Parent(m_currentDirectory);Scan(m_currentDirectory,m_config,entries,&count);page=0;}else if(event==E_PREV){if(page>0)--page;}else if(event==E_NEXT){if((page+1)*ROWS<count)++page;}else if(event>=E_ROW&&event<E_ROW+ROWS){int index=page*ROWS+event-E_ROW;if(index<count){if(entries[index].dir){char next[PATH_LEN];Join(m_currentDirectory,entries[index].name,next,sizeof(next));Copy(m_currentDirectory,next,sizeof(m_currentDirectory));Append(m_currentDirectory,"\\",sizeof(m_currentDirectory));Scan(m_currentDirectory,m_config,entries,&count);page=0;}else{char selected[PATH_LEN];Join(m_currentDirectory,entries[index].name,selected,sizeof(selected));if(m_config.onFileSelected)m_config.onFileSelected(*this,selected);if(m_state==StateFileSelector)ReturnToMenu();done=true;}}}
  }free(entries);
@@ -118,7 +119,8 @@ void Application::RunSettings(){
  if(m_config.onSettings&&(!m_config.settings||m_config.settingCount<=0)){m_config.onSettings(*this);if(m_state==StateSettings)ReturnToMenu();return;}
  if(m_state!=StateSettings)return;if(!m_config.settings||m_config.settingCount<=0){ReturnToMenu();return;}
  int page=0;bool done=false;while(!done&&m_state==StateSettings){Elements el;EventDialog d("Settings");int pages=(m_config.settingCount+ROWS-1)/ROWS;if(page>=pages&&pages>0)page=pages-1;if(page<0)page=0;
-  for(int row=0;row<ROWS;++row){int index=page*ROWS+row;if(index<m_config.settingCount){Setting&s=m_config.settings[index];char label[96],value[32];Copy(label,s.name?s.name:"Setting",sizeof(label));Append(label,": ",sizeof(label));Value(s,value,sizeof(value));Append(label,value,sizeof(label));Button(el,d,row,label,E_ROW+row);}else Button(el,d,row," ",E_ROW+row,false);}
+  int visible=m_config.settingCount-page*ROWS;if(visible>ROWS)visible=ROWS;
+  for(int row=0;row<visible;++row){int index=page*ROWS+row;Setting&s=m_config.settings[index];char label[96],value[32];Copy(label,s.name?s.name:"Setting",sizeof(label));Append(label,": ",sizeof(label));Value(s,value,sizeof(value));Append(label,value,sizeof(label));Button(el,d,row,label,E_ROW+row);}
   Bottom(el,d,8,38,"<",E_PREV);Bottom(el,d,50,38,">",E_NEXT);Bottom(el,d,94,116,"Back",E_BACK);
   d.ShowDialog();int event=d.EventID();if(event==E_BACK){ReturnToMenu();done=true;}else if(event==E_PREV){if(page>0)--page;}else if(event==E_NEXT){if((page+1)*ROWS<m_config.settingCount)++page;}else if(event>=E_ROW&&event<E_ROW+ROWS){int index=page*ROWS+event-E_ROW;if(index<m_config.settingCount)Adjust(m_config.settings[index],*this);if(m_state!=StateSettings)done=true;}
  }
