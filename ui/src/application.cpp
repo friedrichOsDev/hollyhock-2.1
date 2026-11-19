@@ -213,21 +213,23 @@ void Sort(Entry *e, int n) {
     }
 }
 void ShowLoadingMessage() {
-    // A small framed status panel on the debug LCD while the directory scan runs.
-    Debug_SetCursorPosition(0, 0);
+    // Center the 22-character panel on the debug console (estimated 26 columns).
+    const int x = 2;
+    Debug_SetCursorPosition(x, 0);
     Debug_PrintString("+--------------------+", false);
-    Debug_SetCursorPosition(0, 1);
-    Debug_PrintString("|  Scanning files... |", false);
-    Debug_SetCursorPosition(0, 2);
-    Debug_PrintString("|    Please wait.    |", false);
-    Debug_SetCursorPosition(0, 3);
+    Debug_SetCursorPosition(x, 1);
+    Debug_PrintString("| Scanning files...  |", false);
+    Debug_SetCursorPosition(x, 2);
+    Debug_PrintString("|   Please wait.     |", false);
+    Debug_SetCursorPosition(x, 3);
     Debug_PrintString("+--------------------+", false);
     LCD_Refresh();
 }
 void ClearLoadingMessage() {
+    const int x = 2;
     for (int row = 0; row < 4; ++row) {
-        Debug_SetCursorPosition(0, row);
-        Debug_PrintString("                        ", false);
+        Debug_SetCursorPosition(x, row);
+        Debug_PrintString("                      ", false);
     }
     LCD_Refresh();
 }
