@@ -1,6 +1,8 @@
 #include <sdk/calc/calc.hpp>
 #include <sdk/os/file.hpp>
 #include <sdk/os/gui.hpp>
+#include <sdk/os/debug.hpp>
+#include <sdk/os/lcd.hpp>
 #include <sdk/os/mem.hpp>
 #include <stddef.h>
 #include <stdint.h>
@@ -210,6 +212,20 @@ void Sort(Entry *e, int n) {
         e[j] = v;
     }
 }
+void ShowLoadingMessage() {
+    Debug_SetCursorPosition(0, 0);
+    Debug_PrintString("Loading directory...", false);
+    Debug_SetCursorPosition(0, 1);
+    Debug_PrintString("Please wait.", false);
+    LCD_Refresh();
+}
+void ClearLoadingMessage() {
+    Debug_SetCursorPosition(0, 0);
+    Debug_PrintString("                        ", false);
+    Debug_SetCursorPosition(0, 1);
+    Debug_PrintString("                        ", false);
+    LCD_Refresh();
+}
 void Scan(const char *dir, const Config &cfg, Entry *e, int *count) {
     *count = 0;
     wchar_t search[PATH_LEN];
@@ -400,7 +416,9 @@ void Application::RunFileSelector() {
         return;
     }
     int count = 0;
+    ShowLoadingMessage();
     Scan(m_currentDirectory, m_config, entries, &count);
+    ClearLoadingMessage();
     int page = 0;
     bool done = false;
     while (!done && m_state == StateFileSelector) {
@@ -434,7 +452,9 @@ void Application::RunFileSelector() {
             done = true;
         } else if (event == E_UP) {
             Parent(m_currentDirectory);
+            ShowLoadingMessage();
             Scan(m_currentDirectory, m_config, entries, &count);
+            ClearLoadingMessage();
             page = 0;
         } else if (event == E_PREV) {
             if (page > 0)
@@ -450,7 +470,9 @@ void Application::RunFileSelector() {
                     Join(m_currentDirectory, entries[index].name, next, sizeof(next));
                     Copy(m_currentDirectory, next, sizeof(m_currentDirectory));
                     Append(m_currentDirectory, "\\", sizeof(m_currentDirectory));
+                    ShowLoadingMessage();
                     Scan(m_currentDirectory, m_config, entries, &count);
+                    ClearLoadingMessage();
                     page = 0;
                 } else {
                     char selected[PATH_LEN];
