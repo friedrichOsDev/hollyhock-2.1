@@ -79,15 +79,24 @@ static void ShowTextFile(const char *path) {
 
     int fd = open(path, OPEN_READ);
     if (fd < 0) {
+        const char *literalPath = "\\\\fls0\\test.txt";
+        struct stat literalStat;
+        int literalStatResult = stat(literalPath, &literalStat);
+        int literalFd = open(literalPath, OPEN_READ);
+        if (literalFd >= 0)
+            close(literalFd);
+
         Debug_SetCursorPosition(0, 4);
-        Debug_Printf(0, 4, true, 0, "stat() result: %d", statResult);
+        Debug_Printf(0, 4, true, 0, "Selected stat: %d", statResult);
         Debug_SetCursorPosition(0, 5);
-        Debug_Printf(0, 5, true, 0, "open() result: %d", fd);
-        if (statResult == 0) {
-            Debug_SetCursorPosition(0, 6);
-            Debug_Printf(0, 6, true, 0, "File size: %lu bytes", (unsigned long)fileStat.fileSize);
-        }
-        Debug_SetCursorPosition(0, 8);
+        Debug_Printf(0, 5, true, 0, "Selected open: %d", fd);
+        Debug_SetCursorPosition(0, 6);
+        Debug_Printf(0, 6, true, 0, "Literal stat: %d", literalStatResult);
+        Debug_SetCursorPosition(0, 7);
+        Debug_Printf(0, 7, true, 0, "Literal open: %d", literalFd);
+        Debug_SetCursorPosition(0, 9);
+        Debug_PrintString("Test path: fls0/test.txt", false);
+        Debug_SetCursorPosition(0, 11);
         Debug_PrintString("Press any key to return.", false);
         LCD_Refresh();
         WaitForKeyPress();
