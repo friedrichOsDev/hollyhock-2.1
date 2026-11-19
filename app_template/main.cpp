@@ -1,6 +1,6 @@
 #include <appdef.hpp>
 #include <sdk/os/debug.hpp>
-#include <sdk/os/file.hpp>
+#include <ui/filesystem.hpp>
 #include <sdk/os/input.hpp>
 #include <sdk/os/lcd.hpp>
 #include <ui/ui.hpp>
@@ -68,35 +68,17 @@ static void ShowTextFile(const char *path) {
     LCD_ClearScreen();
     LCD_Refresh();
 
+    char normalizedPath[256];
+    int normalizeResult = UI::FileSystem::NormalizePath(path, normalizedPath, sizeof(normalizedPath));
     Debug_SetCursorPosition(0, 0);
     Debug_PrintString("TEXT FILE VIEWER", true);
     Debug_SetCursorPosition(0, 1);
-    Debug_PrintString(path, false);
-    Debug_SetCursorPosition(0, 3);
+    Debug_PrintString(normalizeResult == 0 ? normalizedPath : path, false);
 
-    struct stat fileStat;
-    int statResult = stat(path, &fileStat);
-
-    int fd = open(path, OPEN_READ);
-    if (fd < 0) {
-        const char *literalPath = "\\\\fls0\\test.txt";
-        struct stat literalStat;
-        int literalStatResult = stat(literalPath, &literalStat);
-        int literalFd = open(literalPath, OPEN_READ);
-        if (literalFd >= 0)
-            close(literalFd);
-
+    if (normalizeResult < 0) {
         Debug_SetCursorPosition(0, 4);
-        Debug_Printf(0, 4, true, 0, "Selected stat: %d", statResult);
-        Debug_SetCursorPosition(0, 5);
-        Debug_Printf(0, 5, true, 0, "Selected open: %d", fd);
-        Debug_SetCursorPosition(0, 6);
-        Debug_Printf(0, 6, true, 0, "Literal stat: %d", literalStatResult);
+        Debug_Printf(0, 4, true, 0, "Path error: %d", normalizeResult);
         Debug_SetCursorPosition(0, 7);
-        Debug_Printf(0, 7, true, 0, "Literal open: %d", literalFd);
-        Debug_SetCursorPosition(0, 9);
-        Debug_PrintString("Test path: fls0/test.txt", false);
-        Debug_SetCursorPosition(0, 11);
         Debug_PrintString("Press any key to return.", false);
         LCD_Refresh();
         WaitForKeyPress();
@@ -105,12 +87,26 @@ static void ShowTextFile(const char *path) {
         return;
     }
 
-    // Read a bounded amount to avoid allocating memory for arbitrarily large files.
+    UI::File file;
+    int openResult = file.Open(path, UI::FileRead);
+    if (openResult < 0) {
+        Debug_SetCursorPosition(0, 4);
+        Debug_Printf(0, 4, true, 0, "Open error: %d", openResult);
+        Debug_SetCursorPosition(0, 7);
+        Debug_PrintString("Press any key to return.", false);
+        LCD_Refresh();
+        WaitForKeyPress();
+        LCD_ClearScreen();
+        LCD_Refresh();
+        return;
+    }
+
+    uint32_t fileSize = 0;
+    int sizeResult = file.GetSize(&fileSize);
     static char content[2048];
-    int bytes = read(fd, content, sizeof(content) - 1);
-    close(fd);
-    if (bytes < 0)
-        bytes = 0;
+    int bytes = file.Read(content, sizeof(content) - 1);
+    file.Close();
+    if (bytes < 0) bytes = 0;
     content[bytes] = '\0';
 
     const int maxCols = 30;
@@ -137,9 +133,13 @@ static void ShowTextFile(const char *path) {
         ++col;
     }
 
-    if (bytes >= (int)sizeof(content) - 1 && row >= maxRows) {
+    if (bytes >= (int)sizeof(content) - 1) {
         Debug_SetCursorPosition(0, maxRows - 1);
-        Debug_PrintString("... file truncated ...", true);
+        Debug_PrintString("... buffer limit ...", true);
+    }
+    if (sizeResult == 0 && fileSize > (uint32_t)bytes) {
+        Debug_SetCursorPosition(0, maxRows);
+        Debug_PrintString("... more file content ...", true);
     }
     Debug_SetCursorPosition(0, maxRows + 1);
     Debug_PrintString("Press any key to return", true);
@@ -148,7 +148,6 @@ static void ShowTextFile(const char *path) {
     LCD_ClearScreen();
     LCD_Refresh();
 }
-
 static void Selected(UI::Application &app, const char *path) {
     ShowTextFile(path);
     app.ReturnToMenu();
