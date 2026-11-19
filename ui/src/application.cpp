@@ -38,16 +38,25 @@ public:
  }
 };
 class Elements{
- void*mem[12];int used;
+ void*mem[24];int used;
+ static char*CopyText(const char*t){
+  char*p=(char*)malloc(256);if(!p)return 0;
+  int i=0;if(t)while(t[i]&&i<255){p[i]=t[i];++i;}p[i]=0;return p;
+ }
 public:Elements():used(0){}
  ~Elements(){for(int i=0;i<used;++i)free(mem[i]);}
  void AddButton(EventDialog&d,uint16_t x,uint16_t y,uint16_t r,uint16_t b,const char*t,int id,bool enabled=true){
-  if(used>=12)return;void*p=malloc(sizeof(GUIButton));if(!p)return;
-  GUIButton*q=new(p)GUIButton(x,y,r,b,t,(uint16_t)id,enabled?GUIButton::FlagEnabled:0);mem[used++]=p;d.AddElement(*q);d.RegisterButton(id);
+  if(used>22)return;
+  void*p=malloc(sizeof(GUIButton));if(!p)return;
+  char*stable=CopyText(t);if(!stable){free(p);return;}
+  GUIButton*q=new(p)GUIButton(x,y,r,b,stable,(uint16_t)id,enabled?GUIButton::FlagEnabled:0);
+  mem[used++]=p;mem[used++]=stable;d.AddElement(*q);d.RegisterButton(id);
  }
  void AddLabel(EventDialog&d,int x,int y,const char*t){
-  if(used>=12)return;void*p=malloc(sizeof(GUILabel));if(!p)return;
-  GUILabel*q=new(p)GUILabel(x,y,t);mem[used++]=p;d.AddElement(*q);
+  if(used>22)return;
+  void*p=malloc(sizeof(GUILabel));if(!p)return;
+  char*stable=CopyText(t);if(!stable){free(p);return;}
+  GUILabel*q=new(p)GUILabel(x,y,stable);mem[used++]=p;mem[used++]=stable;d.AddElement(*q);
  }
 };
 int Len(const char*s){int n=0;if(s)while(s[n])++n;return n;}
