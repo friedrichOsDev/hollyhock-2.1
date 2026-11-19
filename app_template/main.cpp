@@ -1,6 +1,6 @@
 #include <appdef.hpp>
-#include <ui/ui.hpp>
 #include <sdk/os/debug.hpp>
+#include <ui/ui.hpp>
 
 APP_NAME("Hollyhock UI API Test")
 APP_DESCRIPTION("Temporary smoke test for the custom UI library API")
@@ -48,8 +48,7 @@ extern "C" void main() {
 
     const UI::FileFilter filters[] = {
         UI::FileFilter(".txt", "Text"),
-        UI::FileFilter("ui-test", "Test")
-    };
+        UI::FileFilter("ui-test", "Test")};
     config.filters = filters;
     config.filterCount = 2;
 
@@ -58,8 +57,7 @@ extern "C" void main() {
         UI::Setting::Boolean("Toggle", &testToggle, "Boolean value"),
         UI::Setting::Integer("Number", &testInteger, 0, 10, 2, "Increment and wrap"),
         UI::Setting::Enumeration("Mode", &testEnum, testEnumOptions, 3, "Cycle options"),
-        UI::Setting::Action("Reset", Reset, "Reset all values")
-    };
+        UI::Setting::Action("Reset", Reset, "Reset all values")};
     config.settings = settings;
     config.settingCount = 4;
     config.onSettings = CustomSettings; // ignored when built-in settings are configured
