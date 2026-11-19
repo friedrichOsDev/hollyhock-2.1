@@ -30,7 +30,7 @@ public:Elements():used(0){}
 int Len(const char*s){int n=0;if(s)while(s[n])++n;return n;}
 void Copy(char*d,const char*s,int cap){if(!d||cap<=0)return;int i=0;if(s)while(s[i]&&i<cap-1){d[i]=s[i];++i;}d[i]=0;}
 void Append(char*d,const char*s,int cap){int n=Len(d);if(n<cap-1)Copy(d+n,s,cap-n);}
-void Number(int v,char*out,int cap){if(cap<=0)return;char rev[16];int n=0;bool neg=v<0;unsigned int u=neg?(unsigned int)(-(v+1))+1U:(unsigned int)v;do{rev[n++]=char('0'+u%10U);u/=10U;}while(u&&n<(int)sizeof(rev);int p=0;if(neg&&p<cap-1)out[p++]='-';while(n&&p<cap-1)out[p++]=rev[--n];out[p]=0;}
+void Number(int v,char*out,int cap){if(cap<=0)return;char rev[16];int n=0;bool neg=v<0;unsigned int u=neg?(unsigned int)(-(v+1))+1U:(unsigned int)v;do{rev[n++]=char('0'+u%10U);u/=10U;}while(u&&n<(int)sizeof(rev));int p=0;if(neg&&p<cap-1)out[p++]='-';while(n&&p<cap-1)out[p++]=rev[--n];out[p]=0;}
 char Lower(char c){return c>='A'&&c<='Z'?char(c+32):c;}
 bool Equal(const char*a,const char*b){if(!a||!b)return false;while(*a&&*b){if(Lower(*a)!=Lower(*b))return false;++a;++b;}return *a==*b;}
 void WideToAscii(const wchar_t*s,char*d,int cap){int i=0;if(s)while(s[i]&&i<cap-1){unsigned int c=(unsigned int)s[i];d[i]=(c>=32&&c<=126)?char(c):'?';++i;}d[i]=0;}
@@ -83,7 +83,8 @@ void Application::RunFileSelector(){
  }free(entries);
 }
 void Application::RunSettings(){
- if(m_config.onSettings)m_config.onSettings(*this);if(m_state!=StateSettings)return;if(!m_config.settings||m_config.settingCount<=0){ReturnToMenu();return;}
+ if(m_config.onSettings&&(!m_config.settings||m_config.settingCount<=0)){m_config.onSettings(*this);if(m_state==StateSettings)ReturnToMenu();return;}
+ if(m_state!=StateSettings)return;if(!m_config.settings||m_config.settingCount<=0){ReturnToMenu();return;}
  int page=0;bool done=false;while(!done&&m_state==StateSettings){EventDialog d("Settings");Elements el;int pages=(m_config.settingCount+ROWS-1)/ROWS;if(page>=pages&&pages>0)page=pages-1;if(page<0)page=0;
   for(int row=0;row<ROWS;++row){int index=page*ROWS+row;if(index<m_config.settingCount){Setting&s=m_config.settings[index];char label[96],value[32];Copy(label,s.name?s.name:"Setting",sizeof(label));Append(label,": ",sizeof(label));Value(s,value,sizeof(value));Append(label,value,sizeof(label));Button(el,d,row,label,E_ROW+row);}else Button(el,d,row," ",E_ROW+row,false);}
   Bottom(el,d,8,38,"<",E_PREV);Bottom(el,d,50,38,">",E_NEXT);Bottom(el,d,94,116,"Back",E_BACK);
