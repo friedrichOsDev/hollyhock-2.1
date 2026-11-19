@@ -1,61 +1,69 @@
 #include <appdef.hpp>
-#include <sdk/calc/calc.hpp>
-#include <sdk/os/lcd.hpp>
+#include <ui/ui.hpp>
 #include <sdk/os/debug.hpp>
 
-/*
- * Fill this section in with some information about your app.
- * All fields are optional - so if you don't need one, take it out.
- */
-APP_NAME("My app name")
-APP_DESCRIPTION("A short description of my app")
-APP_AUTHOR("My name")
-APP_VERSION("1.0.2")
+APP_NAME("Hollyhock UI API Test")
+APP_DESCRIPTION("Temporary smoke test for the custom UI library API")
+APP_AUTHOR("Friedrich")
+APP_VERSION("0.1")
 
-extern "C"
-void main() {
-	calcInit(); //backup screen and init some variables
+static bool testToggle = false;
+static int testInteger = 2;
+static int testEnum = 0;
+static const char *testEnumOptions[] = {"First", "Second", "Third"};
 
-	// Put your app's code here!
+static void Start(UI::Application &app) {
+    Debug_PrintString("Start callback invoked", 0);
+    (void)app;
+}
 
-	//Example for fillScreen(color);
-	fillScreen(color(0,64,0));
+static void Selected(UI::Application &app, const char *path) {
+    Debug_PrintString("File callback invoked", 0);
+    Debug_SetCursorPosition(1, 1);
+    Debug_PrintString(path, 0);
+    app.ReturnToMenu();
+}
 
-	//Example for Debug_Printf(x,y,invert_color,0,format_string) //(small text)
-	Debug_Printf(10,1,false,0,"HelloWorld%d",42);
+static void Reset(UI::Application &app) {
+    testToggle = false;
+    testInteger = 2;
+    testEnum = 0;
+    app.ReturnToMenu();
+}
 
-	//Example for Debug_PrintString(string, invert_color) //(big text)
-	Debug_SetCursorPosition(13,1);
-	Debug_PrintString("HelloWorld",0);
+static void CustomSettings(UI::Application &app) {
+    Debug_PrintString("Custom settings callback", 0);
+    app.ReturnToMenu();
+}
 
-	//use this command to actually update the screen 
-	LCD_Refresh();
+extern "C" void main() {
+    UI::Config config;
+    config.title = "UI API test";
+    config.startLabel = "Test Start";
+    config.onStart = Start;
 
-	//Example for setPixel(x,y,color)
-	for (int x=0; x<256;x++){
-		for (int y=0; y<256; y++){
-			setPixel(50+x,250+y, color(x,y,0) );
-		}
-	}
+    config.showFileSelector = true;
+    config.filesLabel = "Browse";
+    config.onFileSelected = Selected;
 
-	//Example for triangle(x0,y0,x1,y1,x2,y2,colorFill,colorLine);
-	triangle(10,20,40,250,300,100,color(0,255,0),color(0,0,255));
+    const UI::FileFilter filters[] = {
+        UI::FileFilter(".txt", "Text"),
+        UI::FileFilter("ui-test", "Test")
+    };
+    config.filters = filters;
+    config.filterCount = 2;
 
-	//Example for line(x1,y1,x2,y2,color);
-	line(100,30,290,500,color(255,0,0));      //Use RGB color
-	line(110,30,300,500,0b1111100000000000);  //Or use 565 color
+    config.showSettings = true;
+    UI::Setting settings[] = {
+        UI::Setting::Boolean("Toggle", &testToggle, "Boolean value"),
+        UI::Setting::Integer("Number", &testInteger, 0, 10, 2, "Increment and wrap"),
+        UI::Setting::Enumeration("Mode", &testEnum, testEnumOptions, 3, "Cycle options"),
+        UI::Setting::Action("Reset", Reset, "Reset all values")
+    };
+    config.settings = settings;
+    config.settingCount = 4;
+    config.onSettings = CustomSettings; // ignored when built-in settings are configured
 
-	//Don't forget to do LCD_Refresh after setPixel(); line(); and triangle();
-	LCD_Refresh();
-
-	//Example for getKey
-	while(true){
-		uint32_t key1, key2;	//First create variables
-		getKey(&key1, &key2);	//then read the keys
-		if(testKey(key1, key2, KEY_CLEAR)){ //Use testKey() to test if a specific key is pressed
-			break;
-		}
-	}
-
-	calcEnd(); //restore screen and do stuff
+    UI::Application app(config);
+    app.Run();
 }
