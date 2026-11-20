@@ -1,18 +1,18 @@
 # Hollyhock UI Library
 
-A small C++ application-menu and file-system helper library for the fx-CP400, built on top of this repository's Hollyhock 2.1 SDK.
+A small C++ application-menu and read-only file-system helper library for the fx-CP400, built on top of this repository's Hollyhock 2.1 SDK.
 
 ## Full documentation
 
-Start here: [UI Library documentation](../doc/ui-library/README.md).
+Start here: the UI Library documentation in ../doc/ui-library/README.md.
 
 The guide covers:
 
 - Build requirements and linking the SDK and UI library.
 - Application menus, callbacks, and navigation.
-- Boolean, integer, and enumeration settings that control the demo's preview, plus action settings to create a sample file and reset values.
+- Boolean, integer, and enumeration settings, plus custom actions.
 - File filters and the built-in file selector.
-- File, directory, path-normalization, and error-handling APIs.
+- Read-only file, directory, path-normalization, and error-handling APIs.
 - Current limitations and data-lifetime requirements.
 
 ## Quick build
@@ -24,9 +24,9 @@ make -C sdk
 make -C ui SDK_DIR=../sdk
 ~~~
 
-This creates `sdk/sdk.o` and `ui/ui.o`. Link both objects into your application and add `sdk/include` and `ui/include` to the compiler include paths.
+This creates sdk/sdk.o and ui/ui.o. Link both objects into your application and add sdk/include and ui/include to the compiler include paths.
 
-The repository's `app_template/` is a complete example that links both libraries. Build it from the repository root with:
+The repository's app_template/ is a complete example that links both libraries. Build it from the repository root with:
 
 ~~~sh
 ./app_template/build.sh
@@ -34,16 +34,16 @@ The repository's `app_template/` is a complete example that links both libraries
 
 ## Demo application
 
-The demo is intended to be a practical companion to the documentation. It demonstrates:
+The demo is a read-only companion to the documentation. It demonstrates:
 
-- A Start callback that uses path normalization and directory enumeration.
-- A file selector filtered to `.txt` files.
-- Reading the selected file and retrieving its size.
+- A Start callback that normalizes a path and enumerates the root directory.
+- A file selector filtered to .txt files.
+- Reading a selected file and retrieving its size.
 - Boolean, integer, and enumeration settings.
-- Action settings that create a sample file and reset the values.
+- A reset action for the in-memory settings.
 
-The demo uses the SDK debug text output for brief feedback; it is not an additional UI Library widget API.
+The demo does not create, write, delete, rename, or move files. It uses SDK debug text output for brief feedback; this is not an additional UI Library widget API.
 
-## Important
+## SDK boundary
 
-The UI Library targets the fx-CP400 and this repository's reverse-engineered Hollyhock 2.1 SDK. Its GUI behavior and firmware calls are platform-specific. Read the limitations in the full documentation and test applications on the target calculator.
+The UI file-system wrapper is intentionally read-only. This does not remove or change the corresponding lower-level file-system functions from the Hollyhock SDK.
