@@ -22,7 +22,7 @@ make -C "$UI_DIR" SDK_DIR="$SDK_DIR" clean
 make -C "$SDK_DIR" clean
 echo
 
-echo "==> Building SDK...
+echo "==> Building SDK..."
 make -C "$SDK_DIR"
 echo
 
