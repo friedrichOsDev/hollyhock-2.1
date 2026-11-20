@@ -67,7 +67,6 @@ int File::GetSize(uint32_t *size) const {
     return ret;
 }
 bool File::IsOpen() const { return m_fd >= 0; }
-int File::Handle() const { return m_fd; }
 
 int FileSystem::NormalizePath(const char *input, char *output, int capacity) {
     if (!input || !output || capacity < 7) return EINVAL;
