@@ -57,7 +57,7 @@ static void ShowStorageInfo(UI::Application &app) {
     if (pathResult == 0) {
         Debug_PrintString(normalizedPath, false);
     } else {
-        Debug_PrintString("Path normalization failed.", false);
+        Debug_PrintString("Normalize path failed.", false);
     }
 
     Debug_SetCursorPosition(0, 2);
@@ -107,7 +107,7 @@ static void CreateSampleFile(UI::Application &app) {
     if (closeResult == 0) {
         Debug_PrintString("Sample file written.", false);
         Debug_SetCursorPosition(0, 1);
-        Debug_PrintString("Open Browse and select it.", false);
+        Debug_PrintString("Select it in Browse.", false);
     } else {
         Debug_PrintString("File close failed.", false);
     }
@@ -174,7 +174,7 @@ static void FileSelected(UI::Application &app, const char *path) {
     file.Close();
 
     Debug_SetCursorPosition(0, 0);
-    Debug_PrintString("File selected successfully", false);
+    Debug_PrintString("File selected.", false);
 
     Debug_SetCursorPosition(0, 1);
     Debug_Printf(0, 1, false, 0, "Size: %u bytes",
