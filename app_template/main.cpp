@@ -117,6 +117,7 @@ static void ShowStorageInfo(UI::Application &app) {
 static void CreateSampleFile(UI::Application &app) {
     (void)app;
 
+    ShowProgress("Stage 1: checking existence");
     // Remove an old copy first: OPEN_CREATE does not promise truncation.
     if (UI::FileSystem::Exists(SAMPLE_PATH)) {
         int removeResult = ::remove("\\fls0\\ui_library_demo.txt");
@@ -129,6 +130,7 @@ static void CreateSampleFile(UI::Application &app) {
         }
     }
 
+    ShowProgress("Stage 3: opening for create");
     UI::File file;
     int result = file.Open(SAMPLE_PATH, UI::FileCreate);
     if (result < 0) {
@@ -140,6 +142,7 @@ static void CreateSampleFile(UI::Application &app) {
     }
 
     int written = file.Write(SAMPLE_CONTENT, (int)(sizeof(SAMPLE_CONTENT) - 1));
+    ShowProgress("Stage 5: closing file");
     int closeResult = file.Close();
     if (written != (int)(sizeof(SAMPLE_CONTENT) - 1) || closeResult < 0) {
         Debug_SetCursorPosition(0, 0);
@@ -150,6 +153,7 @@ static void CreateSampleFile(UI::Application &app) {
     }
 
     // Re-open and verify that the bytes were actually stored.
+    ShowProgress("Stage 6: reopening for verify");
     result = file.Open(SAMPLE_PATH, UI::FileRead);
     if (result < 0) {
         Debug_SetCursorPosition(0, 0);
@@ -159,9 +163,11 @@ static void CreateSampleFile(UI::Application &app) {
         return;
     }
 
+    ShowProgress("Stage 7: getting file size");
     uint32_t size = 0;
     result = file.GetSize(&size);
     char verify[sizeof(SAMPLE_CONTENT)];
+    ShowProgress("Stage 8: reading verify data");
     int bytesRead = result == 0
                         ? file.Read(verify, (int)(sizeof(SAMPLE_CONTENT) - 1))
                         : result;
