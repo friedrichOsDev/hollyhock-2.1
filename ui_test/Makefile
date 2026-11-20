@@ -1,4 +1,4 @@
-# Build app_template and link the SDK and custom UI library.
+# Build ui_test and link the SDK and custom UI library.
 # Example: make SDK_DIR=../sdk UI_DIR=../ui all
 
 APP_NAME := ui_test
