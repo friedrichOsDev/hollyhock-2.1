@@ -163,25 +163,6 @@ bool Equal(const char *a, const char *b) {
     }
     return *a == *b;
 }
-void WideToAscii(const wchar_t *s, char *d, int cap) {
-    int i = 0;
-    if (s)
-        while (s[i] && i < cap - 1) {
-            unsigned int c = (unsigned int)s[i];
-            d[i] = (c >= 32 && c <= 126) ? char(c) : '?';
-            ++i;
-        }
-    d[i] = 0;
-}
-void AsciiToWide(const char *s, wchar_t *d, int cap) {
-    int i = 0;
-    if (s)
-        while (s[i] && i < cap - 1) {
-            d[i] = (wchar_t)(unsigned char)s[i];
-            ++i;
-        }
-    d[i] = 0;
-}
 struct Entry {
     char name[NAME_LEN];
     bool dir;
