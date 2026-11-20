@@ -84,8 +84,8 @@ void ShowSelectedFile(UI::Application &app, const char *path) {
     uint32_t size = 0;
     int sizeResult = openResult;
     int seekResult = openResult;
-    int bytesRead = 0;
-    char preview[49];
+    int bytesRead = -1;
+    char preview[49] = {0};
 
     if (openResult >= 0) {
         sizeResult = file.GetSize(&size);
