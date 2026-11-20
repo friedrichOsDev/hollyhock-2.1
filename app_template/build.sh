@@ -16,11 +16,13 @@ echo "SDK directory: $SDK_DIR"
 echo "UI directory:  $UI_DIR"
 echo
 
-echo "==> Clean app artifacts..."
+echo "==> Clean all build artifacts..."
 make -C "$APP_DIR" SDK_DIR="$SDK_DIR" UI_DIR="$UI_DIR" clean
+make -C "$UI_DIR" SDK_DIR="$SDK_DIR" clean
+make -C "$SDK_DIR" clean
 echo
 
-echo "==> Building SDK..."
+echo "==> Building SDK...
 make -C "$SDK_DIR"
 echo
 
