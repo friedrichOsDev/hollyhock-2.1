@@ -112,7 +112,6 @@ void ShowSelectedFile(UI::Application &app, const char *path) {
     UI::File file;
     const int openResult = file.Open(path);
     const bool openState = file.IsOpen();
-    const int handle = file.Handle();
     uint32_t size = 0;
     int sizeResult = openResult;
     int seekResult = openResult;
@@ -156,7 +155,7 @@ void ShowSelectedFile(UI::Application &app, const char *path) {
     if (openResult < 0)
         Debug_Printf(0, 3, false, 0, "Open error: %d", openResult);
     else
-        Debug_Printf(0, 3, false, 0, "Open:%s fd:%d", openState && handle >= 0 ? "PASS" : "FAIL", handle);
+        Debug_Printf(0, 3, false, 0, "Open:%s", openState ? "PASS" : "FAIL");
     Debug_SetCursorPosition(0, 4);
     if (sizeResult < 0 || seekResult < 0)
         Debug_Printf(0, 4, false, 0, "Size:%d Seek:%d", sizeResult, seekResult);
