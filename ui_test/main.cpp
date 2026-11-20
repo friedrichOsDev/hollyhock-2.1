@@ -53,7 +53,7 @@ void ShowBrowserDiagnostics(UI::Application &app) {
     }
 
     Debug_SetCursorPosition(0, 0);
-    Debug_PrintString("Read-only browser diagnostics", false);
+    Debug_PrintString("Browser API test", false);
     Debug_SetCursorPosition(0, 1);
     Debug_PrintString(pathResult == 0 && alternateResult == 0 ? "Path normalization: PASS" : "Path normalization: FAIL", false);
     Debug_SetCursorPosition(0, 2);
@@ -62,7 +62,7 @@ void ShowBrowserDiagnostics(UI::Application &app) {
     Debug_PrintString(volumeResult == ENOVOLUME ? "Volume validation: PASS" : "Volume validation: FAIL", false);
     Debug_SetCursorPosition(0, 4);
     if (directoryResult == 0)
-        Debug_Printf(0, 4, false, 0, "Dir open:%s entries:%d", directoryOpenState ? "yes" : "no", entries);
+        Debug_Printf(0, 4, false, 0, "Dir:%s/%s n:%d", directoryOpenState ? "open" : "bad", directoryClosedState ? "closed" : "bad", entries);
     else
         Debug_Printf(0, 4, false, 0, "Directory error: %d", directoryResult);
 
@@ -136,8 +136,10 @@ void ShowSelectedFile(UI::Application &app, const char *path) {
                 }
             }
         }
-        file.Close();
     }
+    int closeResult = openResult;
+    if (file.IsOpen())
+        closeResult = file.Close();
     const bool closedState = !file.IsOpen();
 
     Debug_SetCursorPosition(0, 0);
@@ -153,12 +155,12 @@ void ShowSelectedFile(UI::Application &app, const char *path) {
     if (openResult < 0)
         Debug_Printf(0, 3, false, 0, "Open error: %d", openResult);
     else
-        Debug_Printf(0, 3, false, 0, "Open:%s handle:%d", openState && closedState ? "PASS" : "FAIL", handle);
+        Debug_Printf(0, 3, false, 0, "Open:%s fd:%d", openState && handle >= 0 ? "PASS" : "FAIL", handle);
     Debug_SetCursorPosition(0, 4);
     if (sizeResult < 0 || seekResult < 0)
         Debug_Printf(0, 4, false, 0, "Size:%d Seek:%d", sizeResult, seekResult);
     else
-        Debug_Printf(0, 4, false, 0, "Size:%u Seek:%d Close:%s", (unsigned int)size, seekResult, closedState ? "PASS" : "FAIL");
+        Debug_Printf(0, 4, false, 0, "Size:%u Seek:%d Close:%s", (unsigned int)size, seekResult, closedState && closeResult >= 0 ? "PASS" : "FAIL");
     Debug_SetCursorPosition(0, 5);
     if (!showPreview)
         Debug_PrintString("Preview disabled in Settings", false);
