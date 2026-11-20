@@ -22,6 +22,38 @@ int Len(const char *s) { int n=0; if(s) while(s[n]) ++n; return n; }
 void Copy(char *dst,const char *src,int cap) { if(!dst||cap<=0)return; int i=0; if(src)while(src[i]&&i<cap-1){dst[i]=src[i];++i;}dst[i]=0; }
 void Append(char *dst,const char *src,int cap) { int n=Len(dst); if(n<cap-1)Copy(dst+n,src,cap-n); }
 void Join(const char *dir,const char *name,char *out,int cap) { Copy(out,dir,cap); int n=Len(out); if(n&&out[n-1]!='\\')Append(out,"\\",cap); Append(out,name,cap); }
+const char *ErrorText(int code){
+ switch(code){
+ case 0:return "Success";
+ case ENOVOLUME:return "Volume missing/invalid. Use fls0/... ";
+ case ENOPATH:return "Path not found.";
+ case EEXIST:return "Already exists.";
+ case ENAMETOOLONG:return "Path is too long.";
+ case EACCES:return "Access denied / unsafe path.";
+ case ENOENT:return "File or folder not found.";
+ case EISDIRECTORY:return "This path is a directory.";
+ case ENOTEMPTY:return "Directory is not empty.";
+ case ENOSPC:return "Storage is full.";
+ case EINVAL:return "Invalid input.";
+ case EBADF:return "Invalid file handle.";
+ default:return "SDK returned an error.";
+ }
+}
+void ShowResult(const char *title,int code,const char *path){
+ Debug_SetCursorPosition(0,0);Debug_PrintString(title,false);
+ Debug_SetCursorPosition(0,1);Debug_Printf(0,1,false,0,"Code: %d",code);
+ Debug_SetCursorPosition(0,2);Debug_PrintString(ErrorText(code),false);
+ if(path){Debug_SetCursorPosition(0,3);Debug_PrintString(path,false);}
+ LCD_Refresh();Wait();
+}
+bool NormalizeUserPath(const char *input,char *out,int cap){
+ int r=UI::FileSystem::NormalizePath(input,out,cap);
+ if(r<0){ShowResult("Invalid path",r,input);return false;}
+ if(out[0]=='\\'&&out[1]=='f'&&out[2]=='l'&&out[3]=='s'&&out[4]=='0'&&out[5]=='\\'&&out[6]==0){
+  ShowResult("Root path protected",EACCES,input);return false;
+ }
+ return true;
+}
 void Wait() { Debug_SetCursorPosition(0,5); Debug_PrintString("Press any key...",false); LCD_Refresh(); Debug_WaitKey(); }
 void Message(const char *title,const char *msg) { Debug_SetCursorPosition(0,0);Debug_PrintString(title,false);Debug_SetCursorPosition(0,1);Debug_PrintString(msg,false);LCD_Refresh();Wait(); }
 
@@ -85,15 +117,18 @@ void Selected(UI::Application &app,const char *path){
  for(;;){int action=ChooseAction(path);if(action==BTN_CANCEL)break;
   if(action==BTN_INFO){ShowInfo(path);continue;}
   if(action==BTN_DELETE){if(Confirm("Confirm delete","Delete selected item?")){int r=::remove(path);Debug_SetCursorPosition(0,0);Debug_PrintString(r==0?"Deleted.":"Delete failed.",false);Debug_SetCursorPosition(0,1);Debug_Printf(0,1,false,0,"Result: %d",r);LCD_Refresh();Wait();}break;}
-  if(action==BTN_RENAME){char dest[256];if(Prompt("Rename / move","Destination: fls0/path",dest,sizeof(dest))){char norm[256]={0};int r=UI::FileSystem::NormalizePath(dest,norm,sizeof(norm));if(r==0)r=::rename(path,norm);Debug_SetCursorPosition(0,0);Debug_PrintString(r==0?"Rename/move OK":"Rename/move failed",false);Debug_SetCursorPosition(0,1);Debug_Printf(0,1,false,0,"Result: %d",r);Debug_SetCursorPosition(0,2);Debug_PrintString(norm,false);LCD_Refresh();Wait();}break;}
+  if(action==BTN_RENAME){char dest[256];if(Prompt("Rename / move","Enter fls0/folder/name (slashes OK)",dest,sizeof(dest))){
+ char norm[256]={0};
+ if(NormalizeUserPath(dest,norm,sizeof(norm))){int r=::rename(path,norm);ShowResult(r==0?"Rename/move OK":"Rename/move failed",r,norm);}
+ }break;}
  }
  app.ReturnToMenu();
 }
 void CreateFile(UI::Application &app){(void)app;char name[128];if(!Prompt("Create file","Path/name: fls0/...",name,sizeof(name)))return;char p[256];int r=UI::FileSystem::NormalizePath(name,p,sizeof(p));if(r==0){UI::File f;r=f.Open(p,UI::FileCreate);if(r>=0){const char text[]="Created by UI file-manager test.\r\n";int n=f.Write(text,sizeof(text)-1);r=n==(int)sizeof(text)-1?f.Close():(n<0?n:-1);}}Debug_SetCursorPosition(0,0);Debug_PrintString(r==0?"File created":"Create failed",false);Debug_SetCursorPosition(0,1);Debug_Printf(0,1,false,0,"Result: %d",r);LCD_Refresh();Wait();}
-void CreateFolder(UI::Application &app){(void)app;char name[128];if(!Prompt("Create folder","Path/name: fls0/...",name,sizeof(name)))return;char p[256];int r=UI::FileSystem::NormalizePath(name,p,sizeof(p));if(r==0)r=::mkdir(p);Debug_SetCursorPosition(0,0);Debug_PrintString(r==0?"Folder created":"Create failed",false);Debug_SetCursorPosition(0,1);Debug_Printf(0,1,false,0,"Result: %d",r);LCD_Refresh();Wait();}
-void DeletePath(UI::Application &app){(void)app;char path[256];if(!Prompt("Delete path","Path to file or folder",path,sizeof(path)))return;char norm[256]={0};int r=UI::FileSystem::NormalizePath(path,norm,sizeof(norm));if(r==0&&Confirm("Confirm delete","Remove this path?"))r=::remove(norm);Debug_SetCursorPosition(0,0);Debug_PrintString(r==0?"Delete completed":"Delete failed / cancelled",false);Debug_SetCursorPosition(0,1);Debug_Printf(0,1,false,0,"Result: %d",r);LCD_Refresh();Wait();}
-void MovePath(UI::Application &app){(void)app;char source[256],destination[256];if(!Prompt("Move / rename","Source path",source,sizeof(source)))return;if(!Prompt("Move / rename","Destination path",destination,sizeof(destination)))return;char a[256]={0},b[256]={0};int r=UI::FileSystem::NormalizePath(source,a,sizeof(a));if(r==0)r=UI::FileSystem::NormalizePath(destination,b,sizeof(b));if(r==0)r=::rename(a,b);Debug_SetCursorPosition(0,0);Debug_PrintString(r==0?"Move / rename OK":"Operation failed",false);Debug_SetCursorPosition(0,1);Debug_Printf(0,1,false,0,"Result: %d",r);Debug_SetCursorPosition(0,2);Debug_PrintString(b,false);LCD_Refresh();Wait();}
-void About(UI::Application &app){(void)app;Message("UI file manager test","Create, browse, read, delete, rename/move and mkdir.");}
+void CreateFolder(UI::Application &app){(void)app;char name[128];if(!Prompt("Create folder","Enter fls0/folder (no trailing slash)",name,sizeof(name)))return;char p[256]={0};if(!NormalizeUserPath(name,p,sizeof(p)))return;int r=::mkdir(p);ShowResult(r==0?"Folder created":"Create failed",r,p);}
+void DeletePath(UI::Application &app){(void)app;char input[256];if(!Prompt("Delete path","Enter fls0/folder/file (slashes OK)",input,sizeof(input)))return;char norm[256]={0};if(!NormalizeUserPath(input,norm,sizeof(norm)))return;if(!UI::FileSystem::Exists(norm)){ShowResult("Path does not exist",ENOENT,norm);return;}if(!Confirm("Confirm delete","Delete file or empty folder?"))return;int r=::remove(norm);ShowResult(r==0?"Delete completed":"Delete failed",r,norm);}
+void MovePath(UI::Application &app){(void)app;char source[256],destination[256];if(!Prompt("Move / rename","Source: fls0/folder/file",source,sizeof(source)))return;if(!Prompt("Move / rename","Destination: fls0/new/path",destination,sizeof(destination)))return;char a[256]={0},b[256]={0};if(!NormalizeUserPath(source,a,sizeof(a)))return;if(!NormalizeUserPath(destination,b,sizeof(b)))return;if(!UI::FileSystem::Exists(a)){ShowResult("Source not found",ENOENT,a);return;}int r=::rename(a,b);ShowResult(r==0?"Move / rename OK":"Operation failed",r,b);}
+void About(UI::Application &app){(void)app;Message("Path format","Always enter: fls0/folder/file.txt\\nForward slashes work. Do not enter only a filename.");}
 }
 extern "C" void main(){
  UI::Config c;c.title="UI File Manager Test";c.startLabel="Test overview";c.filesLabel="Browse / manage";c.settingsLabel="Operations";c.quitLabel="Exit";
