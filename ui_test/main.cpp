@@ -13,7 +13,7 @@ static bool showPreview = true;
 static int previewBytes = 24;
 
 void WaitForUser() {
-    Debug_SetCursorPosition(0, 6);
+    Debug_SetCursorPosition(0, 7);
     Debug_PrintString("Press any key...", false);
     LCD_Refresh();
     Debug_WaitKey();
@@ -65,8 +65,41 @@ void ShowBrowserDiagnostics(UI::Application &app) {
         Debug_Printf(0, 4, false, 0, "Dir open:%s entries:%d", directoryOpenState ? "yes" : "no", entries);
     else
         Debug_Printf(0, 4, false, 0, "Directory error: %d", directoryResult);
+
+    // This tests Calc Vars (MCS), not the fls0 file system. The UI file
+    // wrapper remains read-only; PersistentStore is the separate save API.
+    UI::PersistentStore store;
+    int storeResult = store.Open("UITEST");
+    int saveResult = storeResult;
+    int loadResult = storeResult;
+    bool roundTrip = false;
+    const char expected[] = "UI MCS API OK";
+    char actual[32] = {0};
+    uint8_t storedType = 0;
+    uint32_t storedSize = 0;
+    if (storeResult == 0) {
+        saveResult = store.Save("APITEST", VARTYPE_STR, expected, sizeof(expected));
+        if (saveResult == 0) {
+            loadResult = store.Load("APITEST", &storedType, actual,
+                                    sizeof(actual), &storedSize);
+            if (loadResult == 0 && storedType == VARTYPE_STR &&
+                storedSize == sizeof(expected)) {
+                roundTrip = true;
+                for (unsigned int i = 0; i < sizeof(expected); ++i) {
+                    if (actual[i] != expected[i]) {
+                        roundTrip = false;
+                        break;
+                    }
+                }
+            }
+        }
+    }
     Debug_SetCursorPosition(0, 5);
-    Debug_Printf(0, 5, false, 0, "MCS settings status: %d", app.SettingsPersistenceResult());
+    Debug_PrintString(roundTrip ? "MCS Save/Load: PASS" : "MCS Save/Load: FAIL", false);
+    Debug_SetCursorPosition(0, 6);
+    Debug_Printf(0, 6, false, 0, "Store:%d Save:%d Load:%d", storeResult, saveResult, loadResult);
+    // The application-level settings use another variable in the same app folder.
+    Debug_Printf(0, 7, false, 0, "Settings status: %d", app.SettingsPersistenceResult());
     LCD_Refresh();
     WaitForUser();
 }
