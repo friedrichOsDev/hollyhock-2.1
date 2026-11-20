@@ -128,6 +128,7 @@ public:
 		const char* title,
 		enum KeyboardState keyboard
 	);
+	virtual ~GUIDialog();
 
 	virtual int OnEvent(struct GUIDialog_Wrapped *dialog, struct GUIDialog_OnEvent_Data *event);
 	
@@ -141,6 +142,8 @@ public:
 	DialogResult ShowDialog();
 
 private:
+	void InstallVTable();
+	void RestoreVTable();
 	struct GUIDialog_Wrapped_VTable *m_oldVTable;
 	struct GUIDialog_Wrapped_VTable m_vtable;
 
