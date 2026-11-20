@@ -224,8 +224,8 @@ extern "C" void main() {
             "Show preview", &showPreview, "Enable file content preview"
         ),
         UI::Setting::Integer(
-            "Preview length", &previewLength, 4, 24, 4,
-            "Number of preview characters"
+            "Preview bytes", &previewLength, 4, 24, 4,
+            "Number of file bytes to read"
         ),
         UI::Setting::Enumeration(
             "Text case", &textCase, textCaseOptions, 3,
