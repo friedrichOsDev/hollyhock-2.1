@@ -201,11 +201,6 @@ static void ResetSettings(UI::Application &app) {
 
 extern "C" void main() {
 
-    Debug_SetCursorPosition(0, 0);
-    Debug_PrintString("Test String 1", true);
-    LCD_Refresh();
-    Debug_WaitKey();
-
     UI::Config config;
     config.title = "Hollyhock UI Demo";
     config.startLabel = "Storage check";
@@ -213,36 +208,16 @@ extern "C" void main() {
     config.settingsLabel = "Settings";
     config.quitLabel = "Quit";
 
-    Debug_SetCursorPosition(0, 0);
-    Debug_PrintString("Test String 2", true);
-    LCD_Refresh();
-    Debug_WaitKey();
-
     config.showStart = true;
     config.onStart = ShowStorageInfo;
 
-    Debug_SetCursorPosition(0, 0);
-    Debug_PrintString("Test String 3", true);
-    LCD_Refresh();
-    Debug_WaitKey();
-
     config.showFileSelector = true;
     config.onFileSelected = FileSelected;
-
-    Debug_SetCursorPosition(0, 0);
-    Debug_PrintString("Test String 4", true);
-    LCD_Refresh();
-    Debug_WaitKey();
 
     const UI::FileFilter filters[] = {
         UI::FileFilter(".txt", "Text files")};
     config.filters = filters;
     config.filterCount = 1;
-
-    Debug_SetCursorPosition(0, 0);
-    Debug_PrintString("Test String 5", true);
-    LCD_Refresh();
-    Debug_WaitKey();
 
     UI::Setting settings[] = {
         UI::Setting::Boolean(
@@ -261,21 +236,10 @@ extern "C" void main() {
     config.settings = settings;
     config.settingCount = sizeof(settings) / sizeof(settings[0]);
 
-    Debug_SetCursorPosition(0, 0);
-    Debug_PrintString("Test String 6", true);
-    LCD_Refresh();
-    Debug_WaitKey();
-
 
     // The UI library manages calcInit()/calcEnd() by default.
     // Keep this enabled unless the application manages VRAM itself.
     config.manageCalculatorLifecycle = true;
-
-    Debug_SetCursorPosition(0, 0);
-    Debug_PrintString("Wait", true);
-    LCD_Refresh();
-    Debug_WaitKey();
-
 
     UI::Application app(config);
     app.Run();
