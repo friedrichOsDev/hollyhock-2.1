@@ -144,7 +144,7 @@ This example assumes that the file contains text. For binary files, treat the bu
 #include <ui/filesystem.hpp>
 
 static int WriteTextFile(const char *path) {
-    static const char contents[] = "Hello from Hollyhock.\\r\\n";
+    static const char contents[] = "Hello from Hollyhock.\r\n";
 
     UI::File file;
     int descriptor = file.Open(path, UI::FileCreate);
