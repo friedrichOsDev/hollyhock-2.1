@@ -80,7 +80,7 @@ static void CreateSampleFile(UI::Application &app) {
     int result = file.Open(SAMPLE_PATH, UI::FileCreate);
     if (result < 0) {
         Debug_SetCursorPosition(0, 0);
-        Debug_PrintString("Could not open sample file.", false);
+        Debug_PrintString("Sample open failed.", false);
         WaitForUser();
         return;
     }
@@ -89,7 +89,7 @@ static void CreateSampleFile(UI::Application &app) {
     if (written < 0) {
         file.Close();
         Debug_SetCursorPosition(0, 0);
-        Debug_PrintString("Writing sample file failed.", false);
+        Debug_PrintString("Sample write failed.", false);
         WaitForUser();
         return;
     }
@@ -97,7 +97,7 @@ static void CreateSampleFile(UI::Application &app) {
     if (written != (int)(sizeof(SAMPLE_CONTENT) - 1)) {
         file.Close();
         Debug_SetCursorPosition(0, 0);
-        Debug_PrintString("Only part of the file was written.", false);
+        Debug_PrintString("Short write occurred.", false);
         WaitForUser();
         return;
     }
@@ -109,7 +109,7 @@ static void CreateSampleFile(UI::Application &app) {
         Debug_SetCursorPosition(0, 1);
         Debug_PrintString("Open Browse and select it.", false);
     } else {
-        Debug_PrintString("File written, close failed.", false);
+        Debug_PrintString("File close failed.", false);
     }
     WaitForUser();
 }
@@ -121,7 +121,7 @@ static void FileSelected(UI::Application &app, const char *path) {
     int result = file.Open(path, UI::FileRead);
     if (result < 0) {
         Debug_SetCursorPosition(0, 0);
-        Debug_PrintString("Could not open selected file.", false);
+        Debug_PrintString("File open failed.", false);
         WaitForUser();
         return;
     }
@@ -152,7 +152,7 @@ static void FileSelected(UI::Application &app, const char *path) {
         if (bytesRead < 0) {
             file.Close();
             Debug_SetCursorPosition(0, 0);
-            Debug_PrintString("Could not read selected file.", false);
+            Debug_PrintString("File read failed.", false);
             WaitForUser();
             return;
         }
@@ -186,7 +186,7 @@ static void FileSelected(UI::Application &app, const char *path) {
         Debug_SetCursorPosition(0, 3);
         Debug_PrintString(preview, false);
     } else {
-        Debug_PrintString("Preview disabled in settings.", false);
+        Debug_PrintString("Preview disabled.", false);
     }
 
     WaitForUser();
