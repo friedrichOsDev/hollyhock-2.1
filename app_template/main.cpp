@@ -22,6 +22,14 @@ static const char *const textCaseOptions[] = {
     "Uppercase",
     "Lowercase"};
 
+static void ShowProgress(const char *message) {
+    Debug_SetCursorPosition(0, 0);
+    Debug_PrintString("Create sample diagnostic", false);
+    Debug_SetCursorPosition(0, 1);
+    Debug_PrintString(message, false);
+    LCD_Refresh();
+}
+
 static void WaitForUser() {
     Debug_SetCursorPosition(0, 4);
     Debug_PrintString("Press a number key.", false);
