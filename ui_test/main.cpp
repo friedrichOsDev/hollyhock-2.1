@@ -21,7 +21,7 @@ enum { BTN_OK=1, BTN_CANCEL=2, BTN_INFO=10, BTN_DELETE=11, BTN_RENAME=12 };
 int Len(const char *s) { int n=0; if(s) while(s[n]) ++n; return n; }
 void Copy(char *dst,const char *src,int cap) { if(!dst||cap<=0)return; int i=0; if(src)while(src[i]&&i<cap-1){dst[i]=src[i];++i;}dst[i]=0; }
 void Append(char *dst,const char *src,int cap) { int n=Len(dst); if(n<cap-1)Copy(dst+n,src,cap-n); }
-void Join(const char *dir,const char *name,char *out,int cap) { Copy(out,dir,cap); int n=Len(out); if(n&&out[n-1]!='\\')Append(out,"\\",cap); Append(out,name,cap); }
+void Wait();
 const char *ErrorText(int code){
  switch(code){
  case 0:return "Success";
