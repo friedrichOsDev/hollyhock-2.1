@@ -51,6 +51,7 @@ void ShowBrowserDiagnostics(UI::Application &app) {
         if (closeResult < 0)
             directoryResult = closeResult;
     }
+    const bool directoryClosedState = !directory.IsOpen();
 
     Debug_SetCursorPosition(0, 0);
     Debug_PrintString("Browser API test", false);
