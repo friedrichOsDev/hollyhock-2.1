@@ -29,7 +29,7 @@ Select **Storage check**.
 
 The callback normalizes the path of the sample file and opens the root directory on `fls0`. It calls `Directory::Next()` until the function returns a negative value, then explicitly closes the directory handle.
 
-The screen reports whether path normalization succeeded and how many entries were returned by the directory search. The SDK wrapper uses a negative result for both the end of a search and an error, so the displayed count is the number of entries returned before that result. It is not a separate verification that every possible entry was read.
+The screen displays the normalized sample-file path (or an error if normalization failed) and how many entries were returned by the directory search. The SDK wrapper uses a negative result for both the end of a search and an error, so the displayed count is the number of entries returned before that result. It is not a separate verification that every possible entry was read.
 
 Press a number key to return to the main menu. This uses the SDK's debug text input, not a UI Library button.
 
