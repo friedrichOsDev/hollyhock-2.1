@@ -120,6 +120,7 @@ static void CreateSampleFile(UI::Application &app) {
     ShowProgress("Stage 1: checking existence");
     // Remove an old copy first: OPEN_CREATE does not promise truncation.
     if (UI::FileSystem::Exists(SAMPLE_PATH)) {
+        ShowProgress("Stage 2: removing old file");
         int removeResult = ::remove("\\fls0\\ui_library_demo.txt");
         if (removeResult < 0) {
             Debug_SetCursorPosition(0, 0);
@@ -141,6 +142,7 @@ static void CreateSampleFile(UI::Application &app) {
         return;
     }
 
+    ShowProgress("Stage 4: writing data");
     int written = file.Write(SAMPLE_CONTENT, (int)(sizeof(SAMPLE_CONTENT) - 1));
     ShowProgress("Stage 5: closing file");
     int closeResult = file.Close();
