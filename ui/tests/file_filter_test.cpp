@@ -38,6 +38,7 @@ int main() {
     UI::Config config;
     Check(config.showStart && config.showQuit && config.manageCalculatorLifecycle, "config defaults");
     Check(!config.showFileSelector && !config.showSettings && !config.onStart, "optional entries default off");
+    Check(config.settingsFolder == 0, "persistent settings disabled by default");
     printf("\n%d failure(s)\n", failures);
     return failures ? 1 : 0;
 }
