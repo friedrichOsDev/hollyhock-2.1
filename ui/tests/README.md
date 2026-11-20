@@ -8,18 +8,22 @@ Run the host-side tests with:
 make -C ui/tests host-test
 ~~~
 
-These tests use the host C++ compiler. They check the public file-filter matching function, the setting factory functions, and the default configuration values. They do not emulate the calculator firmware or test the native GUI implementation.
+These tests use the host C++ compiler. They check file-filter matching, setting factories, and default configuration values, including that MCS persistence is disabled unless a folder is explicitly configured. They do not emulate calculator firmware, MCS calls, or the native GUI implementation.
 
-## Calculator demo
+## Calculator UI test
 
-The application in `app_template/` is the UI Library's calculator demo and the practical companion to the documentation. It is built with the SH-4 cross-toolchain and linked against both the SDK and UI library.
+The ui_test/ application tests the public read-only file-browser API on the calculator. It exercises path normalization and rejection, directory enumeration, filtering, file metadata, opening, handle state, seeking, reading, and closing. It also uses a separate MCS folder named UITEST to test persistent built-in settings.
 
-From the repository root, run:
+Build it from the repository root:
+
+~~~sh
+./ui_test/build.sh
+~~~
+
+The build produces ui_test/ui_test.bin and ui_test/ui_test.hhk. Copy the .hhk file to the calculator's fls0 root and run it with the Hollyhock launcher. All file-system operations exposed by this UI test are read-only.
+
+The app_template/ program remains the smaller example used in the documentation:
 
 ~~~sh
 ./app_template/build.sh
 ~~~
-
-The build produces `app_template/app_template.bin` and `app_template/app_template.hhk`. Copy the `.hhk` file to the calculator's `fls0` root and run it with the Hollyhock launcher.
-
-See the [Demo Walkthrough](../../doc/ui-library/demo-walkthrough.md) for instructions on trying each feature.
