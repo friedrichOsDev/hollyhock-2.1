@@ -2,12 +2,11 @@
 #include <sdk/os/debug.hpp>
 #include <sdk/os/lcd.hpp>
 #include <ui/ui.hpp>
-#include <stddef.h>
 
 APP_NAME("UI File Browser Test")
-APP_DESCRIPTION("Read-only file browser test for the Hollyhock UI library")
+APP_DESCRIPTION("Read-only file browser and persistent settings API test")
 APP_AUTHOR("Friedrich")
-APP_VERSION("1.1")
+APP_VERSION("1.2")
 
 namespace {
 static bool showPreview = true;
@@ -20,23 +19,26 @@ void WaitForUser() {
     Debug_WaitKey();
 }
 
-void ShowHeader(const char *title) {
-    Debug_SetCursorPosition(0, 0);
-    Debug_PrintString(title, false);
-}
-
 void ShowBrowserDiagnostics(UI::Application &app) {
-    (void)app;
-
     char normalized[128];
     const int pathResult = UI::FileSystem::NormalizePath(
         "fls0/", normalized, sizeof(normalized));
+    char alternate[128];
+    const int alternateResult = UI::FileSystem::NormalizePath(
+        "/fls0//", alternate, sizeof(alternate));
+    char rejected[128];
+    const int traversalResult = UI::FileSystem::NormalizePath(
+        "fls0/../", rejected, sizeof(rejected));
+    const int volumeResult = UI::FileSystem::NormalizePath(
+        "other/file.txt", rejected, sizeof(rejected));
 
     int entries = 0;
     int directoryResult = 0;
+    bool directoryOpenState = false;
     UI::Directory directory;
     directoryResult = directory.Open("fls0/");
     if (directoryResult == 0) {
+        directoryOpenState = directory.IsOpen();
         UI::DirectoryEntry entry;
         while (directory.Next(&entry) == 0) {
             if (entry.name[0] == '.' &&
@@ -50,45 +52,49 @@ void ShowBrowserDiagnostics(UI::Application &app) {
             directoryResult = closeResult;
     }
 
-    const bool rootExists = UI::FileSystem::Exists("fls0/");
     Debug_SetCursorPosition(0, 0);
-    Debug_PrintString("Read-only browser test", false);
+    Debug_PrintString("Read-only browser diagnostics", false);
     Debug_SetCursorPosition(0, 1);
-    Debug_PrintString(pathResult == 0 ? "Path normalization: PASS" : "Path normalization: FAIL", false);
+    Debug_PrintString(pathResult == 0 && alternateResult == 0 ? "Path normalization: PASS" : "Path normalization: FAIL", false);
     Debug_SetCursorPosition(0, 2);
-    Debug_PrintString(rootExists ? "fls0 root: FOUND" : "fls0 root: NOT FOUND", false);
+    Debug_PrintString(traversalResult == EACCES ? "Traversal protection: PASS" : "Traversal protection: FAIL", false);
     Debug_SetCursorPosition(0, 3);
-    if (directoryResult == 0)
-        Debug_Printf(0, 3, false, 0, "Root entries: %d", entries);
-    else
-        Debug_Printf(0, 3, false, 0, "Directory error: %d", directoryResult);
+    Debug_PrintString(volumeResult == ENOVOLUME ? "Volume validation: PASS" : "Volume validation: FAIL", false);
     Debug_SetCursorPosition(0, 4);
-    if (pathResult == 0)
-        Debug_PrintString(normalized, false);
+    if (directoryResult == 0)
+        Debug_Printf(0, 4, false, 0, "Dir open:%s entries:%d", directoryOpenState ? "yes" : "no", entries);
+    else
+        Debug_Printf(0, 4, false, 0, "Directory error: %d", directoryResult);
+    Debug_SetCursorPosition(0, 5);
+    Debug_Printf(0, 5, false, 0, "MCS settings status: %d", app.SettingsPersistenceResult());
     LCD_Refresh();
     WaitForUser();
 }
 
 void ShowSelectedFile(UI::Application &app, const char *path) {
     (void)app;
-
     struct stat info;
     const int statResult = UI::FileSystem::Stat(path, &info);
+    const bool exists = UI::FileSystem::Exists(path);
 
     UI::File file;
     const int openResult = file.Open(path);
+    const bool openState = file.IsOpen();
+    const int handle = file.Handle();
     uint32_t size = 0;
     int sizeResult = openResult;
+    int seekResult = openResult;
     int bytesRead = 0;
     char preview[49];
 
     if (openResult >= 0) {
         sizeResult = file.GetSize(&size);
-        if (sizeResult == 0 && showPreview) {
+        seekResult = file.Seek(0, SEEK_SET);
+        if (sizeResult == 0 && seekResult >= 0 && showPreview) {
             int requested = previewBytes;
             if (requested < 8) requested = 8;
             if (requested > 48) requested = 48;
-            int toRead = size < (uint32_t)requested ? (int)size : requested;
+            const int toRead = size < (uint32_t)requested ? (int)size : requested;
             bytesRead = file.Read(preview, toRead);
             if (bytesRead >= 0) {
                 preview[bytesRead] = '\0';
@@ -101,6 +107,7 @@ void ShowSelectedFile(UI::Application &app, const char *path) {
         }
         file.Close();
     }
+    const bool closedState = !file.IsOpen();
 
     Debug_SetCursorPosition(0, 0);
     Debug_PrintString("Selected file (read-only)", false);
@@ -108,28 +115,26 @@ void ShowSelectedFile(UI::Application &app, const char *path) {
     Debug_PrintString(path, false);
     Debug_SetCursorPosition(0, 2);
     if (statResult == 0)
-        Debug_Printf(0, 2, false, 0, "Stat size: %u", (unsigned int)info.fileSize);
+        Debug_Printf(0, 2, false, 0, "Stat:%u Exists:%s", (unsigned int)info.fileSize, exists ? "yes" : "no");
     else
         Debug_Printf(0, 2, false, 0, "Stat error: %d", statResult);
     Debug_SetCursorPosition(0, 3);
     if (openResult < 0)
         Debug_Printf(0, 3, false, 0, "Open error: %d", openResult);
-    else if (sizeResult < 0)
-        Debug_Printf(0, 3, false, 0, "Size error: %d", sizeResult);
     else
-        Debug_Printf(0, 3, false, 0, "Opened OK, size: %u", (unsigned int)size);
-
+        Debug_Printf(0, 3, false, 0, "Open:%s handle:%d", openState && closedState ? "PASS" : "FAIL", handle);
     Debug_SetCursorPosition(0, 4);
+    if (sizeResult < 0 || seekResult < 0)
+        Debug_Printf(0, 4, false, 0, "Size:%d Seek:%d", sizeResult, seekResult);
+    else
+        Debug_Printf(0, 4, false, 0, "Size:%u Seek:%d Close:%s", (unsigned int)size, seekResult, closedState ? "PASS" : "FAIL");
+    Debug_SetCursorPosition(0, 5);
     if (!showPreview)
         Debug_PrintString("Preview disabled in Settings", false);
     else if (bytesRead < 0)
-        Debug_Printf(0, 4, false, 0, "Read error: %d", bytesRead);
+        Debug_Printf(0, 5, false, 0, "Read error: %d", bytesRead);
     else
-        Debug_PrintString("Preview:", false);
-    if (showPreview && bytesRead >= 0) {
-        Debug_SetCursorPosition(0, 5);
         Debug_PrintString(preview, false);
-    }
 
     LCD_Refresh();
     WaitForUser();
@@ -149,6 +154,7 @@ extern "C" void main() {
     config.filesLabel = "Browse files";
     config.settingsLabel = "Browser settings";
     config.quitLabel = "Exit";
+    config.settingsFolder = "UITEST";
 
     config.showStart = true;
     config.onStart = ShowBrowserDiagnostics;
