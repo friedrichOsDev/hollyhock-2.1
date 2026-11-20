@@ -195,8 +195,10 @@ The wrappers return the negative error codes defined by the SDK in sdk/include/s
 | EACCES | Access denied; also used when a path contains a .. component |
 | ENOVOLUME | The path does not name the supported fls0 volume |
 | ENAMETOOLONG | The normalized path does not fit into the supplied buffer |
-| ENOENT | The requested path does not exist |
+| ENOPATH | The requested path does not exist |
 | EBADF | The file or directory object is not open |
 | ENOMEM | Memory allocation failed |
+| EOUTOFBOUND | A supplied buffer or requested range is too small/out of bounds |
+| EUNFORMAT | Stored data or file-system format is invalid |
 
 Check the complete list in the SDK header when handling specific failures. Preserve and inspect actual error codes when diagnosing failures.
