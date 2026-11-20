@@ -1,139 +1,177 @@
 #include <appdef.hpp>
 #include <sdk/os/debug.hpp>
 #include <sdk/os/lcd.hpp>
-#include <sdk/os/gui.hpp>
-#include <sdk/os/file.hpp>
-#include <sdk/os/mem.hpp>
-#include <stddef.h>
 #include <ui/ui.hpp>
+#include <stddef.h>
 
-inline void *operator new(size_t, void *memory) noexcept { return memory; }
-inline void operator delete(void *, void *) noexcept {}
-
-APP_NAME("UI File Manager Test")
-APP_DESCRIPTION("Test the Hollyhock UI library file operations")
+APP_NAME("UI File Browser Test")
+APP_DESCRIPTION("Read-only file browser test for the Hollyhock UI library")
 APP_AUTHOR("Friedrich")
-APP_VERSION("1.0")
+APP_VERSION("1.1")
 
 namespace {
-enum { BTN_OK=1, BTN_CANCEL=2, BTN_INFO=10, BTN_DELETE=11, BTN_RENAME=12 };
+static bool showPreview = true;
+static int previewBytes = 24;
 
-int Len(const char *s) { int n=0; if(s) while(s[n]) ++n; return n; }
-void Copy(char *dst,const char *src,int cap) { if(!dst||cap<=0)return; int i=0; if(src)while(src[i]&&i<cap-1){dst[i]=src[i];++i;}dst[i]=0; }
-void Append(char *dst,const char *src,int cap) { int n=Len(dst); if(n<cap-1)Copy(dst+n,src,cap-n); }
-void Wait();
-const char *ErrorText(int code){
- switch(code){
- case 0:return "Success";
- case ENOVOLUME:return "Volume missing/invalid. Use fls0/... ";
- case ENOPATH:return "Path not found.";
- case EEXIST:return "Already exists.";
- case ENAMETOOLONG:return "Path is too long.";
- case EACCES:return "Access denied / unsafe path.";
- case ENOENT:return "File or folder not found.";
- case EISDIRECTORY:return "This path is a directory.";
- case ENOTEMPTY:return "Directory is not empty.";
- case ENOSPC:return "Storage is full.";
- case EINVAL:return "Invalid input.";
- case EBADF:return "Invalid file handle.";
- default:return "SDK returned an error.";
- }
+void WaitForUser() {
+    Debug_SetCursorPosition(0, 6);
+    Debug_PrintString("Press any key...", false);
+    LCD_Refresh();
+    Debug_WaitKey();
 }
-void ShowResult(const char *title,int code,const char *path){
- Debug_SetCursorPosition(0,0);Debug_PrintString(title,false);
- Debug_SetCursorPosition(0,1);Debug_Printf(0,1,false,0,"Code: %d",code);
- Debug_SetCursorPosition(0,2);Debug_PrintString(ErrorText(code),false);
- if(path){Debug_SetCursorPosition(0,3);Debug_PrintString(path,false);}
- LCD_Refresh();Wait();
-}
-bool NormalizeUserPath(const char *input,char *out,int cap){
- int r=UI::FileSystem::NormalizePath(input,out,cap);
- if(r<0){ShowResult("Invalid path",r,input);return false;}
- if(out[0]=='\\'&&out[1]=='f'&&out[2]=='l'&&out[3]=='s'&&out[4]=='0'&&out[5]=='\\'&&out[6]==0){
-  ShowResult("Root path protected",EACCES,input);return false;
- }
- return true;
-}
-void Wait() { Debug_SetCursorPosition(0,5); Debug_PrintString("Press any key...",false); LCD_Refresh(); Debug_WaitKey(); }
-void Message(const char *title,const char *msg) { Debug_SetCursorPosition(0,0);Debug_PrintString(title,false);Debug_SetCursorPosition(0,1);Debug_PrintString(msg,false);LCD_Refresh();Wait(); }
 
-class EventDialog : public GUIDialog {
- int ids[8],count,event;
-public:
- EventDialog(const char *title,Height h=Height55):GUIDialog(h,AlignCenter,title,KeyboardStateNone),count(0),event(0){}
- void Register(int id){if(count<8)ids[count++]=id;}
- int Event(){return event;}
- int OnEvent(GUIDialog_Wrapped *d,GUIDialog_OnEvent_Data *e) override {
-  if(e){int id=e->GetEventID();for(int i=0;i<count;i++)if(ids[i]==id){event=id;return GUIDialog::DialogResultOK;}}
-  return GUIDialog::OnEvent(d,e);
- }
-};
-struct ElementStorage {
- void *p[8]; int n=0;
- ~ElementStorage(){for(int i=0;i<n;i++)free(p[i]);}
- template<class T> T *Make(){if(n>=8)return 0;void *m=malloc(sizeof(T));if(!m)return 0;p[n++]=m;return new(m)T;}
-};
-int ChooseAction(const char *path) {
- EventDialog d("File actions",GUIDialog::Height55); ElementStorage s;
- const int x=d.GetLeftX()+8,y=d.GetTopY()+8,w=(d.GetRightX()-d.GetLeftX()-16)/2,h=34;
- const char *labels[]={"Info / Read","Delete","Rename / Move","Cancel"};
- int ids[]={BTN_INFO,BTN_DELETE,BTN_RENAME,BTN_CANCEL};
- for(int i=0;i<4;i++){void *m=malloc(sizeof(GUIButton)); if(!m)continue; s.p[s.n++]=m;
-  GUIButton *b=new(m) GUIButton(x+(i%2)*(w+4),y+(i/2)*(h+5),x+(i%2)*(w+4)+w,y+(i/2)*(h+5)+h,labels[i],ids[i],GUIButton::FlagEnabled);
-  d.AddElement(*b);d.Register(ids[i]);
- }
- (void)path;d.ShowDialog();return d.Event();
+void ShowHeader(const char *title) {
+    Debug_SetCursorPosition(0, 0);
+    Debug_PrintString(title, false);
 }
-bool Confirm(const char *title,const char *text) {
- EventDialog d(title,GUIDialog::Height35);ElementStorage s;
- const int x=d.GetLeftX()+8,y=d.GetBottomY()-40,w=64;
- const char *labels[]={"Yes","No"};int ids[]={BTN_OK,BTN_CANCEL};
- for(int i=0;i<2;i++){void *m=malloc(sizeof(GUIButton));if(!m)continue;s.p[s.n++]=m;
-  GUIButton *b=new(m) GUIButton(x+i*(w+8),y,x+i*(w+8)+w,y+32,labels[i],ids[i],GUIButton::FlagEnabled);d.AddElement(*b);d.Register(ids[i]);}
- void *lm=malloc(sizeof(GUILabel));if(lm){s.p[s.n++]=lm;GUILabel *l=new(lm)GUILabel(d.GetLeftX()+8,d.GetTopY()+12,text);d.AddElement(*l);}
- d.ShowDialog();return d.Event()==BTN_OK;
+
+void ShowBrowserDiagnostics(UI::Application &app) {
+    (void)app;
+
+    char normalized[128];
+    const int pathResult = UI::FileSystem::NormalizePath(
+        "fls0/", normalized, sizeof(normalized));
+
+    int entries = 0;
+    int directoryResult = 0;
+    UI::Directory directory;
+    directoryResult = directory.Open("fls0/");
+    if (directoryResult == 0) {
+        UI::DirectoryEntry entry;
+        while (directory.Next(&entry) == 0) {
+            if (entry.name[0] == '.' &&
+                (entry.name[1] == '\0' ||
+                 (entry.name[1] == '.' && entry.name[2] == '\0')))
+                continue;
+            ++entries;
+        }
+        const int closeResult = directory.Close();
+        if (closeResult < 0)
+            directoryResult = closeResult;
+    }
+
+    const bool rootExists = UI::FileSystem::Exists("fls0/");
+    Debug_SetCursorPosition(0, 0);
+    Debug_PrintString("Read-only browser test", false);
+    Debug_SetCursorPosition(0, 1);
+    Debug_PrintString(pathResult == 0 ? "Path normalization: PASS" : "Path normalization: FAIL", false);
+    Debug_SetCursorPosition(0, 2);
+    Debug_PrintString(rootExists ? "fls0 root: FOUND" : "fls0 root: NOT FOUND", false);
+    Debug_SetCursorPosition(0, 3);
+    if (directoryResult == 0)
+        Debug_Printf(0, 3, false, 0, "Root entries: %d", entries);
+    else
+        Debug_Printf(0, 3, false, 0, "Directory error: %d", directoryResult);
+    Debug_SetCursorPosition(0, 4);
+    if (pathResult == 0)
+        Debug_PrintString(normalized, false);
+    LCD_Refresh();
+    WaitForUser();
 }
-bool Prompt(const char *title,const char *hint,char *out,int cap) {
- EventDialog d(title,GUIDialog::Height55);ElementStorage s;
- void *lm=malloc(sizeof(GUILabel));if(lm){s.p[s.n++]=lm;GUILabel *l=new(lm)GUILabel(d.GetLeftX()+8,d.GetTopY()+8,hint);d.AddElement(*l);}
- void *tm=malloc(sizeof(GUITextBox));if(!tm)return false;s.p[s.n++]=tm;
- GUITextBox *tb=new(tm)GUITextBox(d.GetLeftX()+8,d.GetTopY()+35,d.GetRightX()-d.GetLeftX()-16,cap-1,true);
- d.AddElement(*tb);
- int y=d.GetBottomY()-38,x=d.GetLeftX()+8;
- for(int i=0;i<2;i++){int id=i?BTN_CANCEL:BTN_OK;const char *label=i?"Cancel":"OK";void *m=malloc(sizeof(GUIButton));if(!m)continue;s.p[s.n++]=m;
-  GUIButton *b=new(m)GUIButton(x+i*76,y,x+i*76+68,y+32,label,id,GUIButton::FlagEnabled);d.AddElement(*b);d.Register(id);}
- d.ShowDialog();if(d.Event()!=BTN_OK)return false;Copy(out,tb->GetText(),cap);return out[0]!=0;
+
+void ShowSelectedFile(UI::Application &app, const char *path) {
+    (void)app;
+
+    struct stat info;
+    const int statResult = UI::FileSystem::Stat(path, &info);
+
+    UI::File file;
+    const int openResult = file.Open(path);
+    uint32_t size = 0;
+    int sizeResult = openResult;
+    int bytesRead = 0;
+    char preview[49];
+
+    if (openResult >= 0) {
+        sizeResult = file.GetSize(&size);
+        if (sizeResult == 0 && showPreview) {
+            int requested = previewBytes;
+            if (requested < 8) requested = 8;
+            if (requested > 48) requested = 48;
+            int toRead = size < (uint32_t)requested ? (int)size : requested;
+            bytesRead = file.Read(preview, toRead);
+            if (bytesRead >= 0) {
+                preview[bytesRead] = '\0';
+                for (int i = 0; i < bytesRead; ++i) {
+                    const unsigned char c = (unsigned char)preview[i];
+                    if (c < 32 || c > 126)
+                        preview[i] = '.';
+                }
+            }
+        }
+        file.Close();
+    }
+
+    Debug_SetCursorPosition(0, 0);
+    Debug_PrintString("Selected file (read-only)", false);
+    Debug_SetCursorPosition(0, 1);
+    Debug_PrintString(path, false);
+    Debug_SetCursorPosition(0, 2);
+    if (statResult == 0)
+        Debug_Printf(0, 2, false, 0, "Stat size: %u", (unsigned int)info.fileSize);
+    else
+        Debug_Printf(0, 2, false, 0, "Stat error: %d", statResult);
+    Debug_SetCursorPosition(0, 3);
+    if (openResult < 0)
+        Debug_Printf(0, 3, false, 0, "Open error: %d", openResult);
+    else if (sizeResult < 0)
+        Debug_Printf(0, 3, false, 0, "Size error: %d", sizeResult);
+    else
+        Debug_Printf(0, 3, false, 0, "Opened OK, size: %u", (unsigned int)size);
+
+    Debug_SetCursorPosition(0, 4);
+    if (!showPreview)
+        Debug_PrintString("Preview disabled in Settings", false);
+    else if (bytesRead < 0)
+        Debug_Printf(0, 4, false, 0, "Read error: %d", bytesRead);
+    else
+        Debug_PrintString("Preview:", false);
+    if (showPreview && bytesRead >= 0) {
+        Debug_SetCursorPosition(0, 5);
+        Debug_PrintString(preview, false);
+    }
+
+    LCD_Refresh();
+    WaitForUser();
 }
-void ShowInfo(const char *path) {
- struct stat st;int r=UI::FileSystem::Stat(path,&st);
- Debug_SetCursorPosition(0,0);Debug_PrintString("File information",false);
- Debug_SetCursorPosition(0,1);Debug_PrintString(path,false);
- Debug_SetCursorPosition(0,2);if(r==0)Debug_Printf(0,2,false,0,"Size: %u bytes",(unsigned)st.fileSize);else Debug_Printf(0,2,false,0,"stat error %d",r);
- Debug_SetCursorPosition(0,3);Debug_PrintString("Read preview (ASCII):",false);
- if(r==0){UI::File f;int o=f.Open(path,UI::FileRead);if(o>=0){char b[25];int n=f.Read(b,24);if(n>=0){b[n]=0;for(int i=0;i<n;i++)if((unsigned char)b[i]<32||(unsigned char)b[i]>126)b[i]='.';Debug_SetCursorPosition(0,4);Debug_PrintString(b,false);}f.Close();}}
- LCD_Refresh();Wait();
+
+void ResetBrowserSettings(UI::Application &app) {
+    showPreview = true;
+    previewBytes = 24;
+    app.ReturnToMenu();
 }
-void Selected(UI::Application &app,const char *path){
- for(;;){int action=ChooseAction(path);if(action==BTN_CANCEL)break;
-  if(action==BTN_INFO){ShowInfo(path);continue;}
-  if(action==BTN_DELETE){if(Confirm("Confirm delete","Delete selected item?")){int r=::remove(path);Debug_SetCursorPosition(0,0);Debug_PrintString(r==0?"Deleted.":"Delete failed.",false);Debug_SetCursorPosition(0,1);Debug_Printf(0,1,false,0,"Result: %d",r);LCD_Refresh();Wait();}break;}
-  if(action==BTN_RENAME){char dest[256];if(Prompt("Rename / move","Enter fls0/folder/name (slashes OK)",dest,sizeof(dest))){
- char norm[256]={0};
- if(NormalizeUserPath(dest,norm,sizeof(norm))){int r=::rename(path,norm);ShowResult(r==0?"Rename/move OK":"Rename/move failed",r,norm);}
- }break;}
- }
- app.ReturnToMenu();
-}
-void CreateFile(UI::Application &app){(void)app;char name[128];if(!Prompt("Create file","Path/name: fls0/...",name,sizeof(name)))return;char p[256];int r=UI::FileSystem::NormalizePath(name,p,sizeof(p));if(r==0){UI::File f;r=f.Open(p,UI::FileCreate);if(r>=0){const char text[]="Created by UI file-manager test.\r\n";int n=f.Write(text,sizeof(text)-1);r=n==(int)sizeof(text)-1?f.Close():(n<0?n:-1);}}Debug_SetCursorPosition(0,0);Debug_PrintString(r==0?"File created":"Create failed",false);Debug_SetCursorPosition(0,1);Debug_Printf(0,1,false,0,"Result: %d",r);LCD_Refresh();Wait();}
-void CreateFolder(UI::Application &app){(void)app;char name[128];if(!Prompt("Create folder","Enter fls0/folder (no trailing slash)",name,sizeof(name)))return;char p[256]={0};if(!NormalizeUserPath(name,p,sizeof(p)))return;int r=::mkdir(p);ShowResult(r==0?"Folder created":"Create failed",r,p);}
-void DeletePath(UI::Application &app){(void)app;char input[256];if(!Prompt("Delete path","Enter fls0/folder/file (slashes OK)",input,sizeof(input)))return;char norm[256]={0};if(!NormalizeUserPath(input,norm,sizeof(norm)))return;if(!UI::FileSystem::Exists(norm)){ShowResult("Path does not exist",ENOENT,norm);return;}if(!Confirm("Confirm delete","Delete file or empty folder?"))return;int r=::remove(norm);ShowResult(r==0?"Delete completed":"Delete failed",r,norm);}
-void MovePath(UI::Application &app){(void)app;char source[256],destination[256];if(!Prompt("Move / rename","Source: fls0/folder/file",source,sizeof(source)))return;if(!Prompt("Move / rename","Destination: fls0/new/path",destination,sizeof(destination)))return;char a[256]={0},b[256]={0};if(!NormalizeUserPath(source,a,sizeof(a)))return;if(!NormalizeUserPath(destination,b,sizeof(b)))return;if(!UI::FileSystem::Exists(a)){ShowResult("Source not found",ENOENT,a);return;}int r=::rename(a,b);ShowResult(r==0?"Move / rename OK":"Operation failed",r,b);}
-void About(UI::Application &app){(void)app;Message("Path format","Always enter: fls0/folder/file.txt\\nForward slashes work. Do not enter only a filename.");}
-}
-extern "C" void main(){
- UI::Config c;c.title="UI File Manager Test";c.startLabel="Test overview";c.filesLabel="Browse / manage";c.settingsLabel="Operations";c.quitLabel="Exit";
- c.showStart=true;c.onStart=About;c.showFileSelector=true;c.onFileSelected=Selected;c.showSettings=true;c.showQuit=true;
- UI::Setting settings[]={UI::Setting::Action("Create file",CreateFile,"Create a text test file"),UI::Setting::Action("Create folder",CreateFolder,"Create a directory"),UI::Setting::Action("Delete path",DeletePath,"Delete a file or empty folder by path"),UI::Setting::Action("Move / rename path",MovePath,"Move or rename a file or folder")};
- c.settings=settings;c.settingCount=sizeof(settings)/sizeof(settings[0]);c.manageCalculatorLifecycle=true;
- UI::Application app(c);app.Run();
+} // namespace
+
+extern "C" void main() {
+    UI::Config config;
+    config.title = "UI File Browser Test";
+    config.startLabel = "Run read-only checks";
+    config.filesLabel = "Browse files";
+    config.settingsLabel = "Browser settings";
+    config.quitLabel = "Exit";
+
+    config.showStart = true;
+    config.onStart = ShowBrowserDiagnostics;
+    config.showFileSelector = true;
+    config.onFileSelected = ShowSelectedFile;
+
+    const UI::FileFilter filters[] = {
+        UI::FileFilter(".txt", "Text files"),
+        UI::FileFilter(".md", "Markdown files")
+    };
+    config.filters = filters;
+    config.filterCount = sizeof(filters) / sizeof(filters[0]);
+
+    UI::Setting settings[] = {
+        UI::Setting::Boolean("Show preview", &showPreview, "Read a preview of selected files"),
+        UI::Setting::Integer("Preview bytes", &previewBytes, 8, 48, 8, "Maximum preview length"),
+        UI::Setting::Action("Reset settings", ResetBrowserSettings, "Restore browser defaults")
+    };
+    config.showSettings = true;
+    config.settings = settings;
+    config.settingCount = sizeof(settings) / sizeof(settings[0]);
+    config.manageCalculatorLifecycle = true;
+
+    UI::Application app(config);
+    app.Run();
 }
