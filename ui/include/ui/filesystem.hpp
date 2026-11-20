@@ -21,7 +21,6 @@ public:
     int Seek(int offset, int whence = SEEK_SET);
     int GetSize(uint32_t *size) const;
     bool IsOpen() const;
-    int Handle() const;
 
 private:
     int m_fd;
