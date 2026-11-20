@@ -319,7 +319,8 @@ void Application::InitializeSettingsPersistence() {
     m_persistenceInitialized = true;
     if (!m_config.settingsFolder || !m_config.settingsFolder[0]) return;
     int result = m_settingsStore.Open(m_config.settingsFolder);
-    if (result < 0) { m_persistenceResult = result; return; }
+    // MCS errors are positive constants (unlike file-system errors).
+    if (result != 0) { m_persistenceResult = result; return; }
     if (!m_config.settings || m_config.settingCount <= 0) { m_persistenceReady = true; return; }
 
     char buffer[PERSISTENCE_BUFFER_SIZE];
@@ -328,7 +329,7 @@ void Application::InitializeSettingsPersistence() {
     if (result == MCS_NO_VARIABLE) {
         m_persistenceReady = true; m_persistenceResult = 0; return;
     }
-    if (result < 0) { m_persistenceResult = result; return; }
+    if (result != 0) { m_persistenceResult = result; return; }
     if (type != VARTYPE_STR || size == 0 || size >= sizeof(buffer)) {
         m_persistenceResult = EUNFORMAT; return;
     }
