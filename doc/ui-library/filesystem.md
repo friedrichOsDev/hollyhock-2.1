@@ -69,7 +69,6 @@ public:
     int Seek(int offset, int whence = SEEK_SET);
     int GetSize(uint32_t *size) const;
     bool IsOpen() const;
-    int Handle() const;
 };
 ~~~
 
@@ -81,7 +80,6 @@ public:
 | Seek(offset, whence = SEEK_SET) | Changes the file position. Returns the new position or a negative error code. |
 | GetSize(size) | Retrieves file metadata and stores the file size in bytes. |
 | IsOpen() | Returns whether the object currently holds a valid descriptor. |
-| Handle() | Returns the native descriptor, or -1 when closed. |
 
 A read may return fewer bytes than requested. A return value of zero means that no more bytes were read (normally end of file). Always check negative return values before using a result as a byte count.
 
