@@ -22,4 +22,4 @@ From the repository root, run:
 
 The build produces `app_template/app_template.bin` and `app_template/app_template.hhk`. Copy the `.hhk` file to the calculator's `fls0` root and run it with the Hollyhock launcher.
 
-See the [Demo Walkthrough](../doc/ui-library/demo-walkthrough.md) for instructions on trying each feature.
+See the [Demo Walkthrough](../../doc/ui-library/demo-walkthrough.md) for instructions on trying each feature.
