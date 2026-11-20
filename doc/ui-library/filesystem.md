@@ -1,20 +1,22 @@
 # File System API
 
-The UI Library provides small C++ wrappers around the file-system functions in the Hollyhock SDK. They are declared in:
+The UI Library provides read-only C++ wrappers around the read operations in the Hollyhock SDK. They are declared in:
 
 ~~~cpp
 #include <ui/filesystem.hpp>
 ~~~
 
-The header is also included by ui/ui.hpp.
+The header is also included by ui/ui.hpp. The wrappers use the SDK file system; they do not provide a separate storage layer.
 
-The wrappers use the SDK's file system. They do not provide a separate file system or storage layer.
+## Read-only design
+
+The UI Library deliberately exposes no file-writing API. Its public interface has no write modes, Write(), create, delete, rename, move, or directory-creation operations.
+
+This restriction applies only to the UI Library. The underlying Hollyhock SDK is unchanged and still provides its native file-system functions, including write and modification functions. Applications that intentionally need those lower-level operations can call the SDK directly, outside the UI Library. The built-in UI file browser never modifies files.
 
 ## Storage volume and path format
 
 The current wrapper supports the calculator's fls0 volume only. It accepts forward slashes and backslashes and converts the path to the native form used by the SDK.
-
-The following inputs refer to the same file:
 
 | Input | Normalized native path |
 | --- | --- |
@@ -28,26 +30,18 @@ In C++ source code, escape each backslash in a string literal:
 "\\fls0\\file.txt"
 ~~~
 
-A path without a leading slash is also valid:
-
-~~~cpp
-"fls0/file.txt"
-~~~
+A path without a leading slash is also valid: "fls0/file.txt".
 
 ### Path validation
 
-FileSystem::NormalizePath() performs these checks:
+NormalizePath() performs these checks:
 
 - The input must identify the fls0 volume. Other volume names are rejected.
 - Repeated separators are collapsed.
 - A path component equal to . is skipped.
 - A path component equal to .. is rejected to prevent parent-directory traversal.
-- The output is written using backslashes and begins with \fls0\.
-- The output buffer must be large enough. The file and directory wrappers use a 256-byte path buffer.
-
-Use a buffer that includes room for the terminating null byte when calling NormalizePath() directly.
-
-Example:
+- The output uses backslashes and begins with \fls0\.
+- The output buffer must be large enough. File and directory wrappers use a 256-byte path buffer.
 
 ~~~cpp
 char nativePath[256];
@@ -56,42 +50,36 @@ int result = UI::FileSystem::NormalizePath(
     nativePath,
     sizeof(nativePath)
 );
-
-if (result == 0) {
-    // nativePath now contains the normalized SDK path.
-} else {
-    // result is a negative SDK error code.
-}
 ~~~
+
+Use a buffer with room for the terminating null byte. A result of zero indicates success; a negative result is an SDK error code.
 
 ## File wrapper
 
 UI::File manages one SDK file descriptor. It is non-copyable. Its destructor calls Close(), so an open descriptor is closed when the object leaves scope.
 
-### Open modes
+Open() accepts only a path and always uses the SDK's OPEN_READ flag. The caller cannot pass flags through the UI wrapper.
 
-The following convenience values are provided:
-
-| Mode | Meaning |
-| --- | --- |
-| UI::FileRead | Open for reading |
-| UI::FileWrite | Open for writing |
-| UI::FileReadWrite | Open for reading and writing |
-| UI::FileCreate | Open for writing and create the file if it does not exist |
-| UI::FileAppend | Open for writing with the file position initially at the end |
-
-These values map directly to the SDK's OPEN_* flags. Combine the flags only when the SDK supports the requested combination.
-
-### Methods
+~~~cpp
+class File {
+public:
+    int Open(const char *path);
+    int Close();
+    int Read(void *buffer, int count);
+    int Seek(int offset, int whence = SEEK_SET);
+    int GetSize(uint32_t *size) const;
+    bool IsOpen() const;
+    int Handle() const;
+};
+~~~
 
 | Method | Description |
 | --- | --- |
-| Open(path, flags = OPEN_READ) | Opens a file. Returns the native file descriptor on success or a negative SDK error code. Calling it closes any file already held by the object first. |
+| Open(path) | Opens the normalized path for reading only. Returns the native descriptor or a negative SDK error code. Closes any descriptor already held by the object first. |
 | Close() | Closes the descriptor. Returns 0 if already closed or if the SDK close operation succeeds. |
 | Read(buffer, count) | Reads up to count bytes. Returns the number of bytes read or a negative error code. |
-| Write(buffer, count) | Writes up to count bytes according to the SDK result. Returns the number of bytes written or a negative error code. |
 | Seek(offset, whence = SEEK_SET) | Changes the file position. Returns the new position or a negative error code. |
-| GetSize(size) | Reads file metadata and stores the file size in bytes. Returns an SDK result code. |
+| GetSize(size) | Retrieves file metadata and stores the file size in bytes. |
 | IsOpen() | Returns whether the object currently holds a valid descriptor. |
 | Handle() | Returns the native descriptor, or -1 when closed. |
 
@@ -104,18 +92,13 @@ A read may return fewer bytes than requested. A return value of zero means that 
 
 static void ReadTextFile(const char *path) {
     UI::File file;
-
-    int descriptor = file.Open(path, UI::FileRead);
-    if (descriptor < 0) {
-        // Handle the SDK error.
+    int descriptor = file.Open(path);
+    if (descriptor < 0)
         return;
-    }
 
     uint32_t fileSize = 0;
-    if (file.GetSize(&fileSize) < 0) {
-        // Handle the metadata error.
+    if (file.GetSize(&fileSize) < 0)
         return;
-    }
 
     char buffer[128];
     int bytesToRead = fileSize < sizeof(buffer) - 1
@@ -123,70 +106,28 @@ static void ReadTextFile(const char *path) {
         : (int)sizeof(buffer) - 1;
 
     int bytesRead = file.Read(buffer, bytesToRead);
-    if (bytesRead < 0) {
-        // Handle the read error.
+    if (bytesRead < 0)
         return;
-    }
 
     buffer[bytesRead] = '\0';
-    // Use the bytes in buffer. This example reads only the first part
-    // of the file when the file is larger than the buffer.
+    // Use the bytes in buffer. Larger files are only read partially here.
 }
 ~~~
 
-The destructor closes the file when the function returns, including on early returns. You can also call Close() explicitly when you want to release the descriptor earlier.
-
-This example assumes that the file contains text. For binary files, treat the buffer as bytes and do not use string functions on it.
-
-### Writing a file
-
-~~~cpp
-#include <ui/filesystem.hpp>
-
-static int WriteTextFile(const char *path) {
-    static const char contents[] = "Hello from Hollyhock.\r\n";
-
-    UI::File file;
-    int descriptor = file.Open(path, UI::FileCreate);
-    if (descriptor < 0) {
-        return descriptor;
-    }
-
-    int written = file.Write(contents, sizeof(contents) - 1);
-    if (written < 0) {
-        return written;
-    }
-
-    if (written != (int)(sizeof(contents) - 1)) {
-        return -1; // The write was shorter than requested.
-    }
-
-    return file.Close();
-}
-~~~
-
-The wrapper exposes the SDK's create flag but does not add a separate truncate operation. Do not assume that opening an existing file with FileCreate clears any bytes after the new data. For a robust replacement operation, use an approach supported by the SDK and verify its behavior on the target calculator.
+The destructor closes the file when the function returns, including on early returns. This example assumes that the file contains text. For binary files, treat the buffer as bytes and do not use string functions on it.
 
 ## FileSystem helper methods
-
-UI::FileSystem contains three static methods:
 
 | Method | Description |
 | --- | --- |
 | NormalizePath(input, output, capacity) | Validates and normalizes a path. Returns 0 on success or a negative SDK error code. |
 | Stat(path, info) | Retrieves file metadata into a struct stat. Returns the SDK result code. |
-| Exists(path) | Returns true when Stat() succeeds. It returns false for any error, not only when a file is missing. |
-
-Example:
+| Exists(path) | Returns true when Stat() succeeds. Returns false for any error, not only when a file is missing. |
 
 ~~~cpp
 struct stat info;
 if (UI::FileSystem::Stat("fls0/readme.txt", &info) == 0) {
     uint32_t size = info.fileSize;
-}
-
-if (UI::FileSystem::Exists("fls0/readme.txt")) {
-    // The SDK successfully found the path.
 }
 ~~~
 
@@ -196,16 +137,17 @@ Because Exists() converts all errors to false, use Stat() when you need to disti
 
 UI::Directory enumerates the entries of one directory. It is non-copyable, and its destructor closes an open search handle.
 
-### Methods
+~~~cpp
+class Directory {
+public:
+    int Open(const char *path);
+    int Next(DirectoryEntry *entry);
+    int Close();
+    bool IsOpen() const;
+};
+~~~
 
-| Method | Description |
-| --- | --- |
-| Open(path) | Starts a directory search. Returns 0 on success or a negative SDK error code. |
-| Next(entry) | Writes the next entry and returns 0. A negative result means the search ended or an error occurred. |
-| Close() | Closes the search handle. Returns 0 if already closed or if closing succeeds. |
-| IsOpen() | Returns whether the directory search handle is open. |
-
-The SDK's find API uses a search handle. Always close it. The wrapper closes it automatically when the object is destroyed, but calling Close() explicitly is useful when the search finishes before the scope ends.
+The SDK's find API uses a search handle. Always close it. The wrapper closes it automatically when the object is destroyed.
 
 Each UI::DirectoryEntry contains:
 
@@ -216,23 +158,12 @@ Each UI::DirectoryEntry contains:
 ### Listing a directory
 
 ~~~cpp
-#include <ui/filesystem.hpp>
-
-static void ListDirectory(const char *path) {
-    UI::Directory directory;
-    if (directory.Open(path) < 0) {
-        return;
-    }
-
+UI::Directory directory;
+if (directory.Open("fls0/") == 0) {
     UI::DirectoryEntry entry;
     while (directory.Next(&entry) == 0) {
-        if (entry.isDirectory) {
-            // Handle a directory.
-        } else {
-            // Handle a file and entry.size.
-        }
+        // Inspect entry.name, entry.isDirectory, and entry.size.
     }
-
     directory.Close();
 }
 ~~~
@@ -241,27 +172,16 @@ The current API uses a negative return value for both end-of-search and errors. 
 
 ## File filters
 
-UI::FileFilter configures the built-in application file selector:
-
 ~~~cpp
 static const UI::FileFilter filters[] = {
     UI::FileFilter(".txt", "Text files"),
     UI::FileFilter("dat", "Data files")
 };
-
 config.filters = filters;
 config.filterCount = 2;
 ~~~
 
-Rules:
-
-- The extension may include or omit its leading dot.
-- Matching is case-insensitive.
-- Matching is based on the filename suffix.
-- Directories are always shown.
-- A null filter array or a non-positive filter count means that every file matches.
-- Empty extension strings are ignored.
-- The description is stored but is not currently shown by the selector.
+Extensions may include or omit the leading dot. Matching is case-insensitive and based on the filename suffix. Directories are always shown. A null filter array or non-positive filter count means every file matches. The description is stored but is not currently displayed.
 
 The selector is not recursive. The user enters directories manually. The current implementation collects at most 64 entries in a directory and displays five entries per page.
 
@@ -279,6 +199,4 @@ The wrappers return the negative error codes defined by the SDK in sdk/include/s
 | EBADF | The file or directory object is not open |
 | ENOMEM | Memory allocation failed |
 
-The SDK defines additional error values. Check the complete list in sdk/include/sdk/os/file.hpp when handling specific failures.
-
-Do not treat every negative result as a Boolean false/true value. Preserve and inspect the actual error code when you need to diagnose a failure.
+Check the complete list in the SDK header when handling specific failures. Preserve and inspect actual error codes when diagnosing failures.
