@@ -55,9 +55,9 @@ static void ShowStorageInfo(UI::Application &app) {
 
     Debug_SetCursorPosition(0, 1);
     if (pathResult == 0) {
-        Debug_PrintString("Path normalization: OK", false);
+        Debug_PrintString(normalizedPath, false);
     } else {
-        Debug_PrintString("Path normalization: ERROR", false);
+        Debug_PrintString("Path normalization failed.", false);
     }
 
     Debug_SetCursorPosition(0, 2);
