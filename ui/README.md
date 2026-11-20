@@ -10,7 +10,7 @@ The guide covers:
 
 - Build requirements and linking the SDK and UI library.
 - Application menus, callbacks, and navigation.
-- Boolean, integer, enumeration, and action settings.
+- Boolean, integer, and enumeration settings that control the demo's preview, plus action settings to create a sample file and reset values.
 - File filters and the built-in file selector.
 - File, directory, path-normalization, and error-handling APIs.
 - Current limitations and data-lifetime requirements.
