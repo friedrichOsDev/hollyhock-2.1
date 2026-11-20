@@ -1,40 +1,49 @@
 # Hollyhock UI Library
 
-Custom menu UI for Hollyhock 2.1 fx-CP400 apps. Uses SDK GUIDialog, GUIButton, GUILabel and filesystem functions; does not call firmware message-box APIs.
+A small C++ application-menu and file-system helper library for the fx-CP400, built on top of this repository's Hollyhock 2.1 SDK.
 
-## Build
-From repository root:
-    make -C sdk
-    make -C ui SDK_DIR=../sdk
-Link ui/ui.o and sdk/sdk.o with your app and add ui/include to compiler include paths.
+## Full documentation
 
-## API
-    #include <ui/ui.hpp>
-    static void Start(UI::Application &app) { (void)app; }
-    static void Selected(UI::Application &app,const char *path) { (void)app; (void)path; }
-    extern "C" void main() {
-      UI::Config config;
-      config.title="Example"; config.onStart=Start;
-      config.showFileSelector=true; config.onFileSelected=Selected;
-      const UI::FileFilter filters[]={UI::FileFilter(".txt","Text"),UI::FileFilter("dat","Data")};
-      config.filters=filters; config.filterCount=2;
-      UI::Application app(config); app.Run();
-    }
+Start here: [UI Library documentation](../doc/ui-library/README.md).
 
-## Settings
-Settings values belong to the app and are changed in-place. Supported: Boolean, Integer, Enum, Action. Keep values/options alive during Run. MCS persistence is not included.
-    bool enabled=true; int level=3; int mode=1;
-    const char *modes[]={"Easy","Normal","Hard"};
-    UI::Setting settings[]={UI::Setting::Boolean("Enabled",&enabled),
-      UI::Setting::Integer("Level",&level,1,10),
-      UI::Setting::Enumeration("Mode",&mode,modes,3)};
-    config.showSettings=true; config.settings=settings; config.settingCount=3;
+The guide covers:
 
-## Navigation and lifecycle
-Run drives the menu loop. Close exits; ReturnToMenu returns to the menu; OpenFileSelector and OpenSettings navigate if enabled. manageCalculatorLifecycle defaults true and calls calcInit/calcEnd; set false if the app manages display backup/restore itself.
+- Build requirements and linking the SDK and UI library.
+- Application menus, callbacks, and navigation.
+- Boolean, integer, enumeration, and action settings.
+- File filters and the built-in file selector.
+- File, directory, path-normalization, and error-handling APIs.
+- Current limitations and data-lifetime requirements.
 
-## File filtering
-Directories always show. Extensions may include or omit the dot and are matched case-insensitively. No filters displays all. Non-ASCII filenames are shown as question marks; non-ASCII paths are not supported.
+## Quick build
 
-## Runtime caveat
-SDK exposes OnEvent and ShowDialog but no documented generic custom-dialog dismissal API. Navigation assumes custom button events return from ShowDialog. This is not hardware-verified; test on the fx-CP400.
+From the repository root:
+
+~~~sh
+make -C sdk
+make -C ui SDK_DIR=../sdk
+~~~
+
+This creates `sdk/sdk.o` and `ui/ui.o`. Link both objects into your application and add `sdk/include` and `ui/include` to the compiler include paths.
+
+The repository's `app_template/` is a complete example that links both libraries. Build it from the repository root with:
+
+~~~sh
+./app_template/build.sh
+~~~
+
+## Demo application
+
+The demo is intended to be a practical companion to the documentation. It demonstrates:
+
+- A Start callback that uses path normalization and directory enumeration.
+- A file selector filtered to `.txt` files.
+- Reading the selected file and retrieving its size.
+- Boolean, integer, and enumeration settings.
+- Action settings that create a sample file and reset the values.
+
+The demo uses the SDK debug text output for brief feedback; it is not an additional UI Library widget API.
+
+## Important
+
+The UI Library targets the fx-CP400 and this repository's reverse-engineered Hollyhock 2.1 SDK. Its GUI behavior and firmware calls are platform-specific. Read the limitations in the full documentation and test applications on the target calculator.
