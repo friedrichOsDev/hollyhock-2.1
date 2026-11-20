@@ -22,6 +22,8 @@ Build it from the repository root:
 
 The build produces ui_test/ui_test.bin and ui_test/ui_test.hhk. Copy the .hhk file to the calculator's fls0 root and run it with the Hollyhock launcher. All file-system operations exposed by this UI test are read-only.
 
+The test also writes and reads a small test variable through PersistentStore in the UITEST Calc Var folder. This is separate from the fls0 file-system API, which remains read-only. Built-in settings use a separate SETTINGS variable in the same app folder.
+
 The app_template/ program remains the smaller example used in the documentation:
 
 ~~~sh
