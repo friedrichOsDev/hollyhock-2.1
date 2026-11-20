@@ -20,8 +20,7 @@ static int textCase = 0;
 static const char *const textCaseOptions[] = {
     "Original",
     "Uppercase",
-    "Lowercase"
-};
+    "Lowercase"};
 
 static void WaitForUser() {
     Debug_SetCursorPosition(0, 4);
@@ -35,8 +34,7 @@ static void ShowStorageInfo(UI::Application &app) {
 
     char normalizedPath[128];
     int pathResult = UI::FileSystem::NormalizePath(
-        SAMPLE_PATH, normalizedPath, sizeof(normalizedPath)
-    );
+        SAMPLE_PATH, normalizedPath, sizeof(normalizedPath));
 
     UI::Directory directory;
     int directoryResult = directory.Open("fls0/");
@@ -141,12 +139,14 @@ static void FileSelected(UI::Application &app, const char *path) {
 
     if (showPreview) {
         int requested = previewLength;
-        if (requested < 4) requested = 4;
-        if (requested > 24) requested = 24;
+        if (requested < 4)
+            requested = 4;
+        if (requested > 24)
+            requested = 24;
 
         int bytesToRead = fileSize < (uint32_t)requested
-            ? (int)fileSize
-            : requested;
+                              ? (int)fileSize
+                              : requested;
 
         bytesRead = file.Read(preview, bytesToRead);
         if (bytesRead < 0) {
@@ -200,6 +200,12 @@ static void ResetSettings(UI::Application &app) {
 }
 
 extern "C" void main() {
+
+    Debug_SetCursorPosition(0, 0);
+    Debug_PrintString("Test String 1", true);
+    LCD_Refresh();
+    Debug_WaitKey();
+
     UI::Config config;
     config.title = "Hollyhock UI Demo";
     config.startLabel = "Storage check";
@@ -207,44 +213,69 @@ extern "C" void main() {
     config.settingsLabel = "Settings";
     config.quitLabel = "Quit";
 
+    Debug_SetCursorPosition(0, 0);
+    Debug_PrintString("Test String 2", true);
+    LCD_Refresh();
+    Debug_WaitKey();
+
     config.showStart = true;
     config.onStart = ShowStorageInfo;
+
+    Debug_SetCursorPosition(0, 0);
+    Debug_PrintString("Test String 3", true);
+    LCD_Refresh();
+    Debug_WaitKey();
 
     config.showFileSelector = true;
     config.onFileSelected = FileSelected;
 
+    Debug_SetCursorPosition(0, 0);
+    Debug_PrintString("Test String 4", true);
+    LCD_Refresh();
+    Debug_WaitKey();
+
     const UI::FileFilter filters[] = {
-        UI::FileFilter(".txt", "Text files")
-    };
+        UI::FileFilter(".txt", "Text files")};
     config.filters = filters;
     config.filterCount = 1;
 
+    Debug_SetCursorPosition(0, 0);
+    Debug_PrintString("Test String 5", true);
+    LCD_Refresh();
+    Debug_WaitKey();
+
     UI::Setting settings[] = {
         UI::Setting::Boolean(
-            "Show preview", &showPreview, "Enable file content preview"
-        ),
+            "Show preview", &showPreview, "Enable file content preview"),
         UI::Setting::Integer(
             "Preview bytes", &previewLength, 4, 24, 4,
-            "Number of file bytes to read"
-        ),
+            "Number of file bytes to read"),
         UI::Setting::Enumeration(
             "Text case", &textCase, textCaseOptions, 3,
-            "Preview letter case"
-        ),
+            "Preview letter case"),
         UI::Setting::Action(
-            "Create sample", CreateSampleFile, "Write a sample text file"
-        ),
+            "Create sample", CreateSampleFile, "Write a sample text file"),
         UI::Setting::Action(
-            "Reset settings", ResetSettings, "Restore default values"
-        )
-    };
+            "Reset settings", ResetSettings, "Restore default values")};
     config.showSettings = true;
     config.settings = settings;
     config.settingCount = sizeof(settings) / sizeof(settings[0]);
 
+    Debug_SetCursorPosition(0, 0);
+    Debug_PrintString("Test String 6", true);
+    LCD_Refresh();
+    Debug_WaitKey();
+
+
     // The UI library manages calcInit()/calcEnd() by default.
     // Keep this enabled unless the application manages VRAM itself.
     config.manageCalculatorLifecycle = true;
+
+    Debug_SetCursorPosition(0, 0);
+    Debug_PrintString("Wait", true);
+    LCD_Refresh();
+    Debug_WaitKey();
+
 
     UI::Application app(config);
     app.Run();
