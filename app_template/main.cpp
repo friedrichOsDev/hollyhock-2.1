@@ -14,18 +14,18 @@ static const char SAMPLE_CONTENT[] =
     "This file was created by the demo application.\r\n"
     "Select it in the file browser to test UI::File.\r\n";
 
-static bool demoEnabled = true;
-static int demoLevel = 2;
-static int demoMode = 0;
-static const char *const demoModes[] = {
-    "Beginner",
-    "Normal",
-    "Advanced"
+static bool showPreview = true;
+static int previewLength = 16;
+static int textCase = 0;
+static const char *const textCaseOptions[] = {
+    "Original",
+    "Uppercase",
+    "Lowercase"
 };
 
 static void WaitForUser() {
     Debug_SetCursorPosition(0, 4);
-    Debug_PrintString("Press a number key to return.", false);
+    Debug_PrintString("Press a number key.", false);
     LCD_Refresh();
     Debug_WaitKey();
 }
@@ -62,7 +62,7 @@ static void ShowStorageInfo(UI::Application &app) {
 
     Debug_SetCursorPosition(0, 2);
     if (directoryResult == 0) {
-        Debug_Printf(0, 2, false, 0, "Root directory entries: %u",
+        Debug_Printf(0, 2, false, 0, "Entries found: %u",
                      (unsigned int)entryCount);
     } else {
         Debug_PrintString("Could not open fls0.", false);
@@ -87,6 +87,7 @@ static void CreateSampleFile(UI::Application &app) {
 
     int written = file.Write(SAMPLE_CONTENT, sizeof(SAMPLE_CONTENT) - 1);
     if (written < 0) {
+        file.Close();
         Debug_SetCursorPosition(0, 0);
         Debug_PrintString("Writing sample file failed.", false);
         WaitForUser();
@@ -94,6 +95,7 @@ static void CreateSampleFile(UI::Application &app) {
     }
 
     if (written != (int)(sizeof(SAMPLE_CONTENT) - 1)) {
+        file.Close();
         Debug_SetCursorPosition(0, 0);
         Debug_PrintString("Only part of the file was written.", false);
         WaitForUser();
@@ -127,32 +129,49 @@ static void FileSelected(UI::Application &app, const char *path) {
     uint32_t fileSize = 0;
     result = file.GetSize(&fileSize);
     if (result < 0) {
+        file.Close();
         Debug_SetCursorPosition(0, 0);
         Debug_PrintString("Could not read file size.", false);
         WaitForUser();
         return;
     }
 
-    char preview[65];
-    int bytesToRead = fileSize < sizeof(preview) - 1
-        ? (int)fileSize
-        : (int)sizeof(preview) - 1;
+    char preview[25];
+    int bytesRead = 0;
 
-    int bytesRead = file.Read(preview, bytesToRead);
-    if (bytesRead < 0) {
-        Debug_SetCursorPosition(0, 0);
-        Debug_PrintString("Could not read selected file.", false);
-        WaitForUser();
-        return;
-    }
+    if (showPreview) {
+        int requested = previewLength;
+        if (requested < 4) requested = 4;
+        if (requested > 24) requested = 24;
 
-    preview[bytesRead] = '\0';
-    for (int i = 0; i < bytesRead; ++i) {
-        unsigned char c = (unsigned char)preview[i];
-        if (c < 32 || c > 126) {
-            preview[i] = ' ';
+        int bytesToRead = fileSize < (uint32_t)requested
+            ? (int)fileSize
+            : requested;
+
+        bytesRead = file.Read(preview, bytesToRead);
+        if (bytesRead < 0) {
+            file.Close();
+            Debug_SetCursorPosition(0, 0);
+            Debug_PrintString("Could not read selected file.", false);
+            WaitForUser();
+            return;
+        }
+
+        preview[bytesRead] = '\0';
+        for (int i = 0; i < bytesRead; ++i) {
+            unsigned char c = (unsigned char)preview[i];
+            if (c < 32 || c > 126) {
+                preview[i] = ' ';
+            } else if (textCase == 1 && c >= 'a' && c <= 'z') {
+                preview[i] = (char)(c - ('a' - 'A'));
+            } else if (textCase == 2 && c >= 'A' && c <= 'Z') {
+                preview[i] = (char)(c + ('a' - 'A'));
+            }
         }
     }
+
+    // Close the file before waiting for input or drawing the result screen.
+    file.Close();
 
     Debug_SetCursorPosition(0, 0);
     Debug_PrintString("File selected successfully", false);
@@ -162,19 +181,21 @@ static void FileSelected(UI::Application &app, const char *path) {
                  (unsigned int)fileSize);
 
     Debug_SetCursorPosition(0, 2);
-    Debug_PrintString("First bytes:", false);
+    if (showPreview) {
+        Debug_PrintString("Text preview:", false);
+        Debug_SetCursorPosition(0, 3);
+        Debug_PrintString(preview, false);
+    } else {
+        Debug_PrintString("Preview disabled in settings.", false);
+    }
 
-    Debug_SetCursorPosition(0, 3);
-    Debug_PrintString(preview, false);
-
-    // The File destructor closes the descriptor when this callback returns.
     WaitForUser();
 }
 
 static void ResetSettings(UI::Application &app) {
-    demoEnabled = true;
-    demoLevel = 2;
-    demoMode = 0;
+    showPreview = true;
+    previewLength = 16;
+    textCase = 0;
     app.ReturnToMenu();
 }
 
@@ -200,13 +221,15 @@ extern "C" void main() {
 
     UI::Setting settings[] = {
         UI::Setting::Boolean(
-            "Demo enabled", &demoEnabled, "A Boolean setting"
+            "Show preview", &showPreview, "Enable file content preview"
         ),
         UI::Setting::Integer(
-            "Demo level", &demoLevel, 0, 10, 2, "An integer setting"
+            "Preview length", &previewLength, 4, 24, 4,
+            "Number of preview characters"
         ),
         UI::Setting::Enumeration(
-            "Mode", &demoMode, demoModes, 3, "An enumeration setting"
+            "Text case", &textCase, textCaseOptions, 3,
+            "Preview letter case"
         ),
         UI::Setting::Action(
             "Create sample", CreateSampleFile, "Write a sample text file"
