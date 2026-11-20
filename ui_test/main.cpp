@@ -3,7 +3,12 @@
 #include <sdk/os/lcd.hpp>
 #include <sdk/os/gui.hpp>
 #include <sdk/os/file.hpp>
+#include <sdk/os/mem.hpp>
+#include <stddef.h>
 #include <ui/ui.hpp>
+
+inline void *operator new(size_t, void *memory) noexcept { return memory; }
+inline void operator delete(void *, void *) noexcept {}
 
 APP_NAME("UI File Manager Test")
 APP_DESCRIPTION("Test the Hollyhock UI library file operations")
@@ -12,7 +17,6 @@ APP_VERSION("1.0")
 
 namespace {
 enum { BTN_OK=1, BTN_CANCEL=2, BTN_INFO=10, BTN_DELETE=11, BTN_RENAME=12 };
-char selectedPath[256] = "\\fls0\\";
 
 int Len(const char *s) { int n=0; if(s) while(s[n]) ++n; return n; }
 void Copy(char *dst,const char *src,int cap) { if(!dst||cap<=0)return; int i=0; if(src)while(src[i]&&i<cap-1){dst[i]=src[i];++i;}dst[i]=0; }
@@ -78,11 +82,10 @@ void ShowInfo(const char *path) {
  LCD_Refresh();Wait();
 }
 void Selected(UI::Application &app,const char *path){
- Copy(selectedPath,path,sizeof(selectedPath));
  for(;;){int action=ChooseAction(path);if(action==BTN_CANCEL)break;
   if(action==BTN_INFO){ShowInfo(path);continue;}
   if(action==BTN_DELETE){if(Confirm("Confirm delete","Delete selected item?")){int r=::remove(path);Debug_SetCursorPosition(0,0);Debug_PrintString(r==0?"Deleted.":"Delete failed.",false);Debug_SetCursorPosition(0,1);Debug_Printf(0,1,false,0,"Result: %d",r);LCD_Refresh();Wait();}break;}
-  if(action==BTN_RENAME){char dest[256];if(Prompt("Rename / move","Destination: fls0/path",dest,sizeof(dest))){char norm[256];int r=UI::FileSystem::NormalizePath(dest,norm,sizeof(norm));if(r==0)r=::rename(path,norm);Debug_SetCursorPosition(0,0);Debug_PrintString(r==0?"Rename/move OK":"Rename/move failed",false);Debug_SetCursorPosition(0,1);Debug_Printf(0,1,false,0,"Result: %d",r);Debug_SetCursorPosition(0,2);Debug_PrintString(norm,false);LCD_Refresh();Wait();}break;}
+  if(action==BTN_RENAME){char dest[256];if(Prompt("Rename / move","Destination: fls0/path",dest,sizeof(dest))){char norm[256]={0};int r=UI::FileSystem::NormalizePath(dest,norm,sizeof(norm));if(r==0)r=::rename(path,norm);Debug_SetCursorPosition(0,0);Debug_PrintString(r==0?"Rename/move OK":"Rename/move failed",false);Debug_SetCursorPosition(0,1);Debug_Printf(0,1,false,0,"Result: %d",r);Debug_SetCursorPosition(0,2);Debug_PrintString(norm,false);LCD_Refresh();Wait();}break;}
  }
  app.ReturnToMenu();
 }
