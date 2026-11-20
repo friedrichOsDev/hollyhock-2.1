@@ -4,9 +4,9 @@
 #include <ui/ui.hpp>
 
 APP_NAME("Hollyhock UI Library Demo")
-APP_DESCRIPTION("Read-only file browser and settings example")
+APP_DESCRIPTION("Read-only file browser and persistent settings example")
 APP_AUTHOR("Friedrich")
-APP_VERSION("1.1")
+APP_VERSION("1.2")
 
 static bool showPreview = true;
 static int previewLength = 24;
@@ -25,7 +25,6 @@ static void WaitForUser() {
 }
 
 static void ShowStorageInfo(UI::Application &app) {
-    (void)app;
     char normalizedPath[128];
     int pathResult = UI::FileSystem::NormalizePath(
         "fls0/", normalizedPath, sizeof(normalizedPath));
@@ -39,9 +38,8 @@ static void ShowStorageInfo(UI::Application &app) {
         while (directory.Next(&entry) == 0) {
             if (!(entry.name[0] == '.' &&
                   (entry.name[1] == 0 ||
-                   (entry.name[1] == '.' && entry.name[2] == 0)))) {
+                   (entry.name[1] == '.' && entry.name[2] == 0))))
                 ++entryCount;
-            }
         }
         int closeResult = directory.Close();
         if (closeResult < 0)
@@ -60,8 +58,7 @@ static void ShowStorageInfo(UI::Application &app) {
     else
         Debug_Printf(0, 3, false, 0, "Directory error: %d", directoryResult);
     Debug_SetCursorPosition(0, 4);
-    if (pathResult == 0)
-        Debug_PrintString(normalizedPath, false);
+    Debug_Printf(0, 4, false, 0, "MCS settings status: %d", app.SettingsPersistenceResult());
     WaitForUser();
 }
 
@@ -74,18 +71,18 @@ static void FileSelected(UI::Application &app, const char *path) {
     int result = file.Open(path);
     uint32_t fileSize = 0;
     int sizeResult = result;
+    int seekResult = result;
     char preview[49];
     int bytesRead = 0;
 
     if (result >= 0) {
         sizeResult = file.GetSize(&fileSize);
-        if (sizeResult == 0 && showPreview) {
+        seekResult = file.Seek(0, SEEK_SET);
+        if (sizeResult == 0 && seekResult >= 0 && showPreview) {
             int requested = previewLength;
             if (requested < 8) requested = 8;
             if (requested > 48) requested = 48;
-            int bytesToRead = fileSize < (uint32_t)requested
-                                  ? (int)fileSize
-                                  : requested;
+            int bytesToRead = fileSize < (uint32_t)requested ? (int)fileSize : requested;
             bytesRead = file.Read(preview, bytesToRead);
             if (bytesRead >= 0) {
                 preview[bytesRead] = '\0';
@@ -102,6 +99,7 @@ static void FileSelected(UI::Application &app, const char *path) {
         }
         file.Close();
     }
+    const bool closed = !file.IsOpen();
 
     Debug_SetCursorPosition(0, 0);
     Debug_PrintString("Selected file (read-only)", false);
@@ -115,10 +113,10 @@ static void FileSelected(UI::Application &app, const char *path) {
     Debug_SetCursorPosition(0, 3);
     if (result < 0)
         Debug_Printf(0, 3, false, 0, "Open error: %d", result);
-    else if (sizeResult < 0)
-        Debug_Printf(0, 3, false, 0, "Size error: %d", sizeResult);
+    else if (sizeResult < 0 || seekResult < 0)
+        Debug_Printf(0, 3, false, 0, "Size:%d Seek:%d", sizeResult, seekResult);
     else
-        Debug_Printf(0, 3, false, 0, "File size: %u bytes", (unsigned int)fileSize);
+        Debug_Printf(0, 3, false, 0, "Size:%u Close:%s", (unsigned int)fileSize, closed ? "PASS" : "FAIL");
     Debug_SetCursorPosition(0, 4);
     if (!showPreview)
         Debug_PrintString("Preview disabled.", false);
@@ -146,6 +144,7 @@ extern "C" void main() {
     config.filesLabel = "Browse files";
     config.settingsLabel = "Settings";
     config.quitLabel = "Quit";
+    config.settingsFolder = "UIDEMO";
 
     config.showStart = true;
     config.onStart = ShowStorageInfo;
