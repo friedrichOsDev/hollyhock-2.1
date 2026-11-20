@@ -1,6 +1,6 @@
 # API Reference
 
-This page summarizes the public API declared in ui/include/ui/. For explanations and longer examples, see [Application Menus and Settings](application.md) and the [File System API](filesystem.md).
+This page summarizes the public API declared in ui/include/ui/. For explanations and longer examples, see Application Menus and Settings and the File System API.
 
 Include the complete public interface with:
 
@@ -28,14 +28,7 @@ void OpenSettings();
 bool IsRunning() const;
 ~~~
 
-The class is non-copyable.
-
-- Run() enters the synchronous menu loop.
-- Close() changes the application state to exit.
-- ReturnToMenu() changes the state to the main menu.
-- OpenFileSelector() requests the file selector when enabled.
-- OpenSettings() requests the built-in settings screen when enabled.
-- IsRunning() returns false after the exit state is selected.
+The class is non-copyable. Run() enters the synchronous menu loop. Close() requests exit. ReturnToMenu() changes the state to the main menu. OpenFileSelector() and OpenSettings() request the corresponding enabled screens. IsRunning() returns false after the exit state is selected.
 
 ### Callback types
 
@@ -58,16 +51,7 @@ typedef void (*FileCallback)(Application &app, const char *path);
 | settings | Setting * |
 | settingCount | int |
 
-The constructor defaults are:
-
-- title = "Application"
-- Labels: "Start", "Files", "Settings", and "Quit"
-- showStart = true
-- showFileSelector = false
-- showSettings = false
-- showQuit = true
-- manageCalculatorLifecycle = true
-- All callbacks and pointer arrays are null; counts are zero.
+Defaults: title is Application; labels are Start, Files, Settings, and Quit; Start and Quit are enabled; File Selector and Settings are disabled; calculator lifecycle management is enabled; callbacks and pointer arrays are null and counts are zero.
 
 ### UI::FileFilter
 
@@ -105,45 +89,20 @@ struct Setting {
     int optionCount;
     ActionCallback action;
 
-    static Setting Boolean(
-        const char *name, bool *value,
-        const char *description = 0
-    );
-
-    static Setting Integer(
-        const char *name, int *value,
-        int minimum, int maximum, int step = 1,
-        const char *description = 0
-    );
-
-    static Setting Enumeration(
-        const char *name, int *value,
-        const char *const *options, int optionCount,
-        const char *description = 0
-    );
-
-    static Setting Action(
-        const char *name, ActionCallback callback,
-        const char *description = 0
-    );
+    static Setting Boolean(const char *, bool *, const char *description = 0);
+    static Setting Integer(const char *, int *, int minimum, int maximum,
+                           int step = 1, const char *description = 0);
+    static Setting Enumeration(const char *, int *, const char *const *,
+                               int optionCount, const char *description = 0);
+    static Setting Action(const char *, ActionCallback, const char *description = 0);
 };
 ~~~
 
 The settings menu reads and modifies the pointed-to values directly. The data must remain alive while the application runs. Descriptions are stored but are not currently drawn by the settings menu.
 
-## File system
+## Read-only file system
 
-### File mode values
-
-The following values are aliases for the SDK open flags:
-
-| Name | Value |
-| --- | --- |
-| FileRead | OPEN_READ |
-| FileWrite | OPEN_WRITE |
-| FileReadWrite | OPEN_READ \| OPEN_WRITE |
-| FileCreate | OPEN_WRITE \| OPEN_CREATE |
-| FileAppend | OPEN_WRITE \| OPEN_APPEND |
+The UI Library intentionally does not expose file modification operations. Its filesystem wrapper cannot create, write, delete, rename, move, or create directories. This is a UI Library restriction only; the lower-level SDK remains unchanged.
 
 ### UI::File
 
@@ -153,10 +112,9 @@ public:
     File();
     ~File();
 
-    int Open(const char *path, int flags = OPEN_READ);
+    int Open(const char *path);
     int Close();
     int Read(void *buffer, int count);
-    int Write(const void *buffer, int count);
     int Seek(int offset, int whence = SEEK_SET);
     int GetSize(uint32_t *size) const;
     bool IsOpen() const;
@@ -164,16 +122,14 @@ public:
 };
 ~~~
 
-The class is non-copyable. Its destructor closes an open descriptor.
+The class is non-copyable. Open(path) always uses the SDK's OPEN_READ flag and offers no way to pass write flags. Its destructor closes an open descriptor.
 
 ### UI::FileSystem
 
 ~~~cpp
 class FileSystem {
 public:
-    static int NormalizePath(
-        const char *input, char *output, int capacity
-    );
+    static int NormalizePath(const char *input, char *output, int capacity);
     static int Stat(const char *path, struct stat *info);
     static bool Exists(const char *path);
 };
@@ -212,11 +168,11 @@ The class is non-copyable. Its destructor closes an open search handle. Next() r
 
 ## Related SDK APIs
 
-The UI Library is layered on top of the Hollyhock SDK. The following SDK interfaces are relevant:
+The UI Library is layered on top of the Hollyhock SDK:
 
 - sdk/os/gui.hpp — dialogs, buttons, labels, text boxes, and other native GUI wrappers.
-- sdk/os/file.hpp — file descriptors, metadata, and directory search functions.
+- sdk/os/file.hpp — descriptors, metadata, directory search, and lower-level SDK file operations.
 - sdk/calc/calc.hpp — calcInit() and calcEnd(), used by the default application lifecycle.
 - sdk/os/debug.hpp — debug text output used by the demo application.
 
-Use the SDK headers as the source of truth for lower-level functions and their return codes.
+The SDK headers remain the source of truth for lower-level functions and return codes. The UI Library's read-only restriction does not remove or alter any SDK function.
