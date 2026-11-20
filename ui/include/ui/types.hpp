@@ -16,6 +16,9 @@ struct Setting {
 };
 struct Config {
  const char *title,*startLabel,*filesLabel,*settingsLabel,*quitLabel;
+ // Optional 1-8 character MCS folder name. When set, settings are loaded
+ // on startup and saved after changes and when the application exits.
+ const char *settingsFolder;
  bool showStart,showFileSelector,showSettings,showQuit,manageCalculatorLifecycle;
  ActionCallback onStart,onSettings; FileCallback onFileSelected;
  const FileFilter *filters; int filterCount; Setting *settings; int settingCount;
