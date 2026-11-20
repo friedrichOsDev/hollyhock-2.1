@@ -6,7 +6,7 @@ This guide explains how to build the library, use it from a Hollyhock applicatio
 
 ## Documentation
 
-- [Getting started](getting-started.md) — toolchain requirements, build steps, linking, and a minimal application.
+- [Demo walkthrough](demo-walkthrough.md) — a step-by-step tour of the example application.\n- [Getting started](getting-started.md) — toolchain requirements, build steps, linking, and a minimal application.
 - [Application menus and settings](application.md) — configuration, callbacks, navigation, settings, and display lifecycle.
 - [File system API](filesystem.md) — normalized paths, files, directories, filters, and error handling.
 - [API reference](api-reference.md) — a compact reference for the public classes, methods, and data types.
