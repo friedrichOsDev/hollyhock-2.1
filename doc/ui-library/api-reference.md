@@ -113,11 +113,10 @@ public:
     int Seek(int offset, int whence = SEEK_SET);
     int GetSize(uint32_t *size) const;
     bool IsOpen() const;
-    int Handle() const;
 };
 ~~~
 
-Open(path) always uses OPEN_READ. The class is non-copyable and closes its descriptor in the destructor.
+Open(path) always uses OPEN_READ. The class is non-copyable, exposes no raw descriptor, and closes its descriptor in the destructor.
 
 ### FileSystem
 
