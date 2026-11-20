@@ -269,6 +269,10 @@ void Parent(char *p) {
 }
 void Value(const Setting &s, char *out, int cap) {
     out[0] = 0;
+    if (s.type == SettingAction) {
+        Copy(out, "Run", cap);
+        return;
+    }
     if (!s.value) {
         Copy(out, "(unset)", cap);
         return;
