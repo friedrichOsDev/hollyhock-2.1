@@ -32,12 +32,14 @@ void ToWide(const char *in, wchar_t *out, int cap) {
 }
 File::File() : m_fd(-1) {}
 File::~File() { Close(); }
-int File::Open(const char *path, int flags) {
+int File::Open(const char *path) {
     Close();
     char native[256];
     int ret = FileSystem::NormalizePath(path, native, sizeof(native));
     if (ret < 0) return ret;
-    m_fd = ::open(native, flags);
+
+    // Do not accept caller-supplied flags: the UI library exposes read access only.
+    m_fd = ::open(native, OPEN_READ);
     return m_fd;
 }
 int File::Close() {
@@ -50,11 +52,6 @@ int File::Read(void *buffer, int count) {
     if (m_fd < 0) return EBADF;
     if (!buffer || count < 0) return EINVAL;
     return ::read(m_fd, buffer, count);
-}
-int File::Write(const void *buffer, int count) {
-    if (m_fd < 0) return EBADF;
-    if (!buffer || count < 0) return EINVAL;
-    return ::write(m_fd, buffer, count);
 }
 int File::Seek(int offset, int whence) {
     if (m_fd < 0) return EBADF;
