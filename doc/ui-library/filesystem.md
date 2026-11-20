@@ -18,14 +18,14 @@ The following inputs refer to the same file:
 
 | Input | Normalized native path |
 | --- | --- |
-| fls0/folder/file.txt | \\fls0\\folder\\file.txt |
-| /fls0/file.txt | \\fls0\\file.txt |
-| \\fls0\\file.txt | \\fls0\\file.txt |
+| fls0/folder/file.txt | \fls0\folder\file.txt |
+| /fls0/file.txt | \fls0\file.txt |
+| \fls0\file.txt | \fls0\file.txt |
 
 In C++ source code, escape each backslash in a string literal:
 
 ~~~cpp
-"\\\\fls0\\\\file.txt"
+"\\fls0\\file.txt"
 ~~~
 
 A path without a leading slash is also valid:
@@ -42,7 +42,7 @@ FileSystem::NormalizePath() performs these checks:
 - Repeated separators are collapsed.
 - A path component equal to . is skipped.
 - A path component equal to .. is rejected to prevent parent-directory traversal.
-- The output is written using backslashes and begins with \\fls0\\.
+- The output is written using backslashes and begins with \fls0\.
 - The output buffer must be large enough. The file and directory wrappers use a 256-byte path buffer.
 
 Use a buffer that includes room for the terminating null byte when calling NormalizePath() directly.
