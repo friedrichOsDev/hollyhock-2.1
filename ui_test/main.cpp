@@ -95,11 +95,9 @@ void ShowBrowserDiagnostics(UI::Application &app) {
         }
     }
     Debug_SetCursorPosition(0, 5);
-    Debug_PrintString(roundTrip ? "MCS Save/Load: PASS" : "MCS Save/Load: FAIL", false);
+    Debug_Printf(0, 5, false, 0, "MCS:%s App:%d", roundTrip ? "PASS" : "FAIL", app.SettingsPersistenceResult());
     Debug_SetCursorPosition(0, 6);
     Debug_Printf(0, 6, false, 0, "Store:%d Save:%d Load:%d", storeResult, saveResult, loadResult);
-    // The application-level settings use another variable in the same app folder.
-    Debug_Printf(0, 7, false, 0, "Settings status: %d", app.SettingsPersistenceResult());
     LCD_Refresh();
     WaitForUser();
 }
