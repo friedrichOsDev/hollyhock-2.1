@@ -1,73 +1,51 @@
 # API Reference
 
-This page summarizes the public API declared in ui/include/ui/. For explanations and longer examples, see Application Menus and Settings and the File System API.
-
-Include the complete public interface with:
+This page summarizes the public API declared in ui/include/ui/. For longer examples, see Application Menus and Settings and the File System API.
 
 ~~~cpp
 #include <ui/ui.hpp>
 ~~~
 
-## Namespace
-
-All UI Library classes, enumerations, structures, and functions are inside the UI namespace.
+All public classes, enumerations, structures, and functions are inside the UI namespace.
 
 ## Application
 
-### UI::Application
-
 ~~~cpp
-explicit Application(const Config &config);
-~Application();
-
-void Run();
-void Close();
-void ReturnToMenu();
-void OpenFileSelector();
-void OpenSettings();
-bool IsRunning() const;
-~~~
-
-The class is non-copyable. Run() enters the synchronous menu loop. Close() requests exit. ReturnToMenu() changes the state to the main menu. OpenFileSelector() and OpenSettings() request the corresponding enabled screens. IsRunning() returns false after the exit state is selected.
-
-### Callback types
-
-~~~cpp
-typedef void (*ActionCallback)(Application &app);
-typedef void (*FileCallback)(Application &app, const char *path);
-~~~
-
-### UI::Config
-
-| Member | Type |
-| --- | --- |
-| title | const char * |
-| startLabel, filesLabel, settingsLabel, quitLabel | const char * |
-| showStart, showFileSelector, showSettings, showQuit, manageCalculatorLifecycle | bool |
-| onStart, onSettings | ActionCallback |
-| onFileSelected | FileCallback |
-| filters | const FileFilter * |
-| filterCount | int |
-| settings | Setting * |
-| settingCount | int |
-
-Defaults: title is Application; labels are Start, Files, Settings, and Quit; Start and Quit are enabled; File Selector and Settings are disabled; calculator lifecycle management is enabled; callbacks and pointer arrays are null and counts are zero.
-
-### UI::FileFilter
-
-~~~cpp
-struct FileFilter {
-    const char *extension;
-    const char *description;
-    FileFilter(const char *ext = 0, const char *desc = 0);
+class Application {
+public:
+    explicit Application(const Config &config);
+    ~Application();
+    void Run();
+    void Close();
+    void ReturnToMenu();
+    void OpenFileSelector();
+    void OpenSettings();
+    bool IsRunning() const;
+    int SettingsPersistenceResult() const;
 };
 ~~~
 
-Filters are matched case-insensitively against the filename suffix. The description is currently not displayed by the selector.
+Application is non-copyable. SettingsPersistenceResult() returns zero on success or the latest MCS persistence error.
+
+## Config
+
+Important fields:
+
+| Member | Type | Default |
+| --- | --- | --- |
+| settingsFolder | const char * | null |
+| settings | Setting * | null |
+| settingCount | int | 0 |
+| filters | const FileFilter * | null |
+| filterCount | int | 0 |
+| showStart, showFileSelector, showSettings, showQuit | bool | true, false, false, true |
+| manageCalculatorLifecycle | bool | true |
+
+The other fields configure menu labels and callbacks. See application.md for the full list.
+
+settingsFolder enables automatic settings persistence in an MCS folder. Folder names must contain 1-8 ASCII letters or digits; they are normalized to uppercase. Use a unique stable name for each application.
 
 ## Settings
-
-### UI::Setting
 
 ~~~cpp
 enum SettingType {
@@ -76,42 +54,59 @@ enum SettingType {
     SettingEnum,
     SettingAction
 };
+~~~
 
-struct Setting {
-    const char *name;
-    const char *description;
-    SettingType type;
-    void *value;
-    int minimum;
-    int maximum;
-    int step;
-    const char *const *options;
-    int optionCount;
-    ActionCallback action;
+Setting::Boolean, Setting::Integer, Setting::Enumeration, and Setting::Action create entries for the built-in settings screen.
 
-    static Setting Boolean(const char *, bool *, const char *description = 0);
-    static Setting Integer(const char *, int *, int minimum, int maximum,
-                           int step = 1, const char *description = 0);
-    static Setting Enumeration(const char *, int *, const char *const *,
-                               int optionCount, const char *description = 0);
-    static Setting Action(const char *, ActionCallback, const char *description = 0);
+Automatic settings persistence stores Boolean, Integer, and Enumeration values and ignores Action values. It supports at most 32 entries and a serialized payload smaller than 512 bytes. Settings are loaded before the first menu is shown and saved after each selection and when Run() exits normally.
+
+## PersistentStore
+
+PersistentStore is the lower-level MCS (Calc Vars) wrapper for application-owned persistent data. It can be used for data beyond the built-in settings array.
+
+~~~cpp
+class PersistentStore {
+public:
+    PersistentStore();
+    ~PersistentStore();
+    int Open(const char *folder);
+    void Close();
+    bool IsOpen() const;
+    const char *Folder() const;
+    int Load(const char *name, uint8_t *type, void *buffer,
+             uint32_t capacity, uint32_t *actualSize) const;
+    int Save(const char *name, uint8_t type,
+             const void *data, uint32_t size);
 };
 ~~~
 
-The settings menu reads and modifies the pointed-to values directly. The data must remain alive while the application runs. Descriptions are stored but are not currently drawn by the settings menu.
+Open() creates the MCS folder when needed. Folder names are validated as 1-8 ASCII letters/digits because the SDK truncates longer names to eight characters. Variable names accepted by this wrapper must contain ASCII letters or digits. Load() copies the stored variable into caller-owned memory and reports its type and size. Save() creates or replaces a variable through MCS_SetVariable(). The caller is responsible for providing a sufficiently large buffer and interpreting the variable type.
+
+Example:
+
+~~~cpp
+UI::PersistentStore store;
+if (store.Open("MYAPP") == 0) {
+    const char data[] = "example";
+    store.Save("USERDATA", VARTYPE_STR, data, sizeof(data));
+    char buffer[64];
+    uint8_t type = 0;
+    uint32_t size = 0;
+    int result = store.Load("USERDATA", &type, buffer, sizeof(buffer), &size);
+}
+~~~
 
 ## Read-only file system
 
-The UI Library intentionally does not expose file modification operations. Its filesystem wrapper cannot create, write, delete, rename, move, or create directories. This is a UI Library restriction only; the lower-level SDK remains unchanged.
+The UI Library exposes no file modification functions. The SDK remains unchanged and continues to provide lower-level write, create, delete, rename, and directory-creation functions to applications that deliberately use the SDK directly.
 
-### UI::File
+### File
 
 ~~~cpp
 class File {
 public:
     File();
     ~File();
-
     int Open(const char *path);
     int Close();
     int Read(void *buffer, int count);
@@ -122,9 +117,9 @@ public:
 };
 ~~~
 
-The class is non-copyable. Open(path) always uses the SDK's OPEN_READ flag and offers no way to pass write flags. Its destructor closes an open descriptor.
+Open(path) always uses OPEN_READ. The class is non-copyable and closes its descriptor in the destructor.
 
-### UI::FileSystem
+### FileSystem
 
 ~~~cpp
 class FileSystem {
@@ -135,9 +130,9 @@ public:
 };
 ~~~
 
-Paths are normalized to the SDK's native fls0 path form. Only the fls0 volume is accepted. Parent traversal using .. is rejected.
+Only fls0 is accepted and parent traversal using .. is rejected.
 
-### UI::DirectoryEntry
+### Directory
 
 ~~~cpp
 struct DirectoryEntry {
@@ -145,18 +140,11 @@ struct DirectoryEntry {
     bool isDirectory;
     uint32_t size;
 };
-~~~
 
-Names are converted from the SDK's wide-character result to printable ASCII. Characters outside ASCII 32–126 are replaced with question marks.
-
-### UI::Directory
-
-~~~cpp
 class Directory {
 public:
     Directory();
     ~Directory();
-
     int Open(const char *path);
     int Next(DirectoryEntry *entry);
     int Close();
@@ -164,15 +152,12 @@ public:
 };
 ~~~
 
-The class is non-copyable. Its destructor closes an open search handle. Next() returns zero for an entry and a negative code when the search ends or fails. The API does not distinguish end-of-search from an error.
+Directory is non-copyable and closes an open search handle in its destructor. Next() returns zero for an entry and a negative SDK code when the search ends or fails.
 
-## Related SDK APIs
+## File filters
 
-The UI Library is layered on top of the Hollyhock SDK:
+FileFilter matches file-name suffixes case-insensitively. Directories remain visible regardless of filter. The filter description is metadata and is not currently displayed.
 
-- sdk/os/gui.hpp — dialogs, buttons, labels, text boxes, and other native GUI wrappers.
-- sdk/os/file.hpp — descriptors, metadata, directory search, and lower-level SDK file operations.
-- sdk/calc/calc.hpp — calcInit() and calcEnd(), used by the default application lifecycle.
-- sdk/os/debug.hpp — debug text output used by the demo application.
+## SDK boundary
 
-The SDK headers remain the source of truth for lower-level functions and return codes. The UI Library's read-only restriction does not remove or alter any SDK function.
+The UI Library uses sdk/os/gui.hpp, sdk/os/file.hpp, sdk/os/mcs.hpp, sdk/calc/calc.hpp, and sdk/os/debug.hpp. The UI file wrapper is read-only; SDK headers and lower-level functionality are unchanged.
