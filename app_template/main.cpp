@@ -73,7 +73,8 @@ static void FileSelected(UI::Application &app, const char *path) {
     int sizeResult = result;
     int seekResult = result;
     char preview[49];
-    int bytesRead = 0;
+    int bytesRead = -1;
+    preview[0] = 0;
 
     if (result >= 0) {
         sizeResult = file.GetSize(&fileSize);
