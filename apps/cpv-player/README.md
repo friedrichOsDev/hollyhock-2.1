@@ -37,7 +37,8 @@ python3 tools/convert.py <video-file> \
     --width <width> \
     --height <height> \
     --fps <fps> \
-    --quality <0..100>
+    --palette-quality <0..100> \
+    --preprocess-quality <0..100>
 ```
 
 Example for the calculator's maximum resolution and target frame rate:
@@ -48,7 +49,8 @@ python3 tools/convert.py input.mp4 \
     --width 528 \
     --height 320 \
     --fps 10 \
-    --quality 75
+    --palette-quality 75 \
+    --preprocess-quality 35
 ```
 
 The input must be readable by FFmpeg. CPV v1 supports dimensions from 1×1 up to 528×320 pixels and frame rates greater than 0 and no greater than 30 FPS.
@@ -65,20 +67,52 @@ CPV v1.1 applies three independent optimisations:
 
 The converter enables DELTA_MASK and LZ4 by default. Use `--no-delta-mask` and/or `--no-lz4` to disable them for benchmarks. The resulting statistics let you compare each optimisation independently.
 
-### Quality settings
+### Independent quality settings
 
-`--quality` controls the global palette budget:
+The converter separates colour quantisation from pre-processing. Adjust these independently because they solve different problems.
 
-| Quality | Palette budget | Behaviour |
+#### Palette quality
+
+`--palette-quality` controls the global palette budget:
+
+| Palette quality | Palette budget | Behaviour |
 |---:|---:|---|
-| 0–14 | 16 colours | Strong quantisation, smallest palette |
-| 15–34 | 32 colours | Aggressive compression |
-| 35–54 | 64 colours | Balanced compression |
+| 0–14 | 16 colours | Strong colour quantisation |
+| 15–34 | 32 colours | Aggressive colour reduction |
+| 35–54 | 64 colours | Balanced colour reduction |
 | 55–74 | 128 colours | Higher colour fidelity |
-| 75–99 | 256 colours | Highest palette quality |
+| 75–99 | 256 colours | Highest palette budget |
 | 100 | Up to 256 + RAW565 | Preserve every source RGB565 value |
 
-Quality 100 uses RAW565 packets for pixels that cannot be represented exactly by the global palette. It is intended for lossless-within-RGB565 output and can produce substantially larger files. For normal calculator playback, start with quality 50–75 and compare the result visually.
+Palette quality 100 uses RAW565 packets for pixels that cannot be represented exactly by the global palette. It is intended for lossless-within-RGB565 colour output and can produce substantially larger files.
+
+#### Pre-processing quality
+
+`--preprocess-quality` controls FFmpeg's `hqdn3d` spatial and temporal denoising filter. It runs after scaling and before output frame-rate reduction. The same filter is applied when generating the global palette and when reading frames for encoding.
+
+| Pre-process quality | Behaviour |
+|---:|---|
+| 0 | Disabled; no denoising (default) |
+| 1–25 | Very mild denoising |
+| 26–50 | Mild to moderate denoising |
+| 51–75 | Stronger spatial and temporal denoising |
+| 76–100 | Strong denoising; fine details may be lost |
+
+Higher pre-process values mean stronger, more lossy filtering, not higher visual fidelity. Denoising can reduce sensor noise and small frame-to-frame changes, which may improve delta and LZ4 compression. It can also remove texture and fine detail, so compare the output visually. Start around 20–40 for noisy footage; use 0 for clean animation, UI recordings, or other sharp material.
+
+Example for a moderately denoised source with a high colour budget:
+
+```bash
+python3 tools/convert.py input.mp4 \
+    --output output.cpv \
+    --width 132 \
+    --height 80 \
+    --fps 5 \
+    --palette-quality 75 \
+    --preprocess-quality 35
+```
+
+Use `--palette-quality` to trade colour accuracy for a smaller palette, and `--preprocess-quality` to trade fine image detail for smoother frames and potentially better temporal compression.
 
 ### Additional options
 
@@ -86,6 +120,8 @@ Quality 100 uses RAW565 packets for pixels that cannot be represented exactly by
 - `--fit contain`: preserve aspect ratio with letterboxing (default).
 - `--fit stretch`: stretch the image to the exact output dimensions.
 - `--background RRGGBB`: letterbox background colour (default `000000`).
+- `--palette-quality 0..100`: global colour palette budget and RGB565-preserving RAW fallback (default `75`).
+- `--preprocess-quality 0..100`: spatial/temporal `hqdn3d` denoising strength; `0` disables pre-processing (default `0`).
 - `--no-delta-mask`: disable mixed SKIP/data delta-mask packets.
 - `--no-lz4`: disable optional independent per-frame LZ4 compression.
 - `--ffmpeg PATH`: select an FFmpeg executable.
