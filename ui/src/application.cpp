@@ -1294,7 +1294,9 @@ bool Application::RunFramebufferFileSelector() {
                             Colors::Gray);
 
         const int footerY = screen.Height() - 36;
-        const int buttonWidth = screen.Width() / 4;
+        int buttonWidth = screen.Width() / 4;
+        if (buttonWidth < 1)
+            buttonWidth = 1;
         const char *footer[4] = {"<", ">", "Up", "Back"};
         for (int i = 0; i < 4; ++i) {
             const int x = i * buttonWidth;
@@ -1503,7 +1505,9 @@ bool Application::RunFramebufferSettings() {
         const Setting &current = m_config.settings[selected];
         if (current.description && current.description[0])
             screen.DrawText(8, footerY - 10, current.description, Colors::Gray);
-        const int buttonWidth = screen.Width() / 3;
+        int buttonWidth = screen.Width() / 3;
+        if (buttonWidth < 1)
+            buttonWidth = 1;
         const char *footer[3] = {"<", ">", "Back"};
         for (int i = 0; i < 3; ++i) {
             const int x = i * buttonWidth;
