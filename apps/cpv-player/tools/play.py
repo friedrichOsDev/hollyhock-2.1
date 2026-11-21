@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import base64
 import bisect
 import struct
 import sys
@@ -442,8 +441,9 @@ class CPVPlayer:
             f"P6\n{self.cpv.width} {self.cpv.height}\n255\n".encode("ascii")
             + self.cpv.to_rgb_bytes(self.framebuffer)
         )
-        encoded = base64.b64encode(ppm).decode("ascii")
-        self.photo = self.tk.PhotoImage(data=encoded, format="PPM")
+        # PPM (P6) contains arbitrary binary pixel bytes. Pass the raw bytes
+        # to Tk; base64 image data is only reliably supported for PNG/GIF.
+        self.photo = self.tk.PhotoImage(data=ppm, format="PPM")
         self.image_label.configure(image=self.photo)
         record = self.cpv.frames[self.current_frame]
         time_text = self._format_time(record.start_ms)
