@@ -1,0 +1,22 @@
+name: UI Library host tests
+
+on:
+  push:
+    paths:
+      - "ui/**"
+      - ".github/workflows/ui-host-tests.yml"
+  pull_request:
+    paths:
+      - "ui/**"
+      - ".github/workflows/ui-host-tests.yml"
+
+jobs:
+  host-tests:
+    name: Build and run host tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Run UI Library host tests
+        run: make -C ui/tests clean host-test

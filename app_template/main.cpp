@@ -1,61 +1,88 @@
 #include <appdef.hpp>
-#include <sdk/calc/calc.hpp>
-#include <sdk/os/lcd.hpp>
-#include <sdk/os/debug.hpp>
+#include <ui/ui.hpp>
 
-/*
- * Fill this section in with some information about your app.
- * All fields are optional - so if you don't need one, take it out.
- */
-APP_NAME("My app name")
-APP_DESCRIPTION("A short description of my app")
-APP_AUTHOR("My name")
-APP_VERSION("1.0.2")
+#include "demo/demo.hpp"
 
-extern "C"
-void main() {
-	calcInit(); //backup screen and init some variables
+APP_NAME("Hollyhock UI Library Showcase")
+APP_DESCRIPTION("Native, framebuffer and custom menu renderer examples")
+APP_AUTHOR("Friedrich")
+APP_VERSION("2.0")
 
-	// Put your app's code here!
+DemoSettings g_demoSettings = {
+    true,   // showPreview
+    32,     // previewBytes
+    0,      // previewFormat
+    true    // showFileSize
+};
 
-	//Example for fillScreen(color);
-	fillScreen(color(0,64,0));
+extern "C" void main() {
+    UI::Config config;
+    config.title = "UI Library Showcase";
+    config.settingsFolder = "UIDEMO2";
 
-	//Example for Debug_Printf(x,y,invert_color,0,format_string) //(small text)
-	Debug_Printf(10,1,false,0,"HelloWorld%d",42);
+    config.showMainMenu = true;
+    config.showStart = true;
+    config.showFileSelector = true;
+    config.showSettings = true;
+    config.showQuit = true;
 
-	//Example for Debug_PrintString(string, invert_color) //(big text)
-	Debug_SetCursorPosition(13,1);
-	Debug_PrintString("HelloWorld",0);
+    // The demo intentionally mixes all three menu renderer modes:
+    // - Framebuffer: library-provided main menu
+    // - Native: original Hollyhock file selector
+    // - Custom: demo-owned settings screen
+    config.mainMenuRenderer = UI::MenuRenderer::Framebuffer;
+    config.fileSelectorRenderer = UI::MenuRenderer::Native;
+    config.settingsRenderer = UI::MenuRenderer::Custom;
 
-	//use this command to actually update the screen 
-	LCD_Refresh();
+    config.startLabel = "Open dashboard";
+    config.filesLabel = "Browse files";
+    config.settingsLabel = "Demo settings";
+    config.quitLabel = "Exit";
 
-	//Example for setPixel(x,y,color)
-	for (int x=0; x<256;x++){
-		for (int y=0; y<256; y++){
-			setPixel(50+x,250+y, color(x,y,0) );
-		}
-	}
+    config.onStart = DemoStart;
+    config.onFileSelected = DemoFileSelected;
+    config.onCustomSettings = DemoCustomSettings;
 
-	//Example for triangle(x0,y0,x1,y1,x2,y2,colorFill,colorLine);
-	triangle(10,20,40,250,300,100,color(0,255,0),color(0,0,255));
+    const UI::FileFilter filters[] = {
+        UI::FileFilter(".txt", "Text files"),
+        UI::FileFilter(".md", "Markdown files"),
+        UI::FileFilter(".ini", "Configuration files"),
+        UI::FileFilter(".cfg", "Configuration files")
+    };
+    config.filters = filters;
+    config.filterCount = sizeof(filters) / sizeof(filters[0]);
 
-	//Example for line(x1,y1,x2,y2,color);
-	line(100,30,290,500,color(255,0,0));      //Use RGB color
-	line(110,30,300,500,0b1111100000000000);  //Or use 565 color
+    const char *const previewFormatOptions[] = {
+        "Text",
+        "Hexadecimal"
+    };
+    UI::Setting settings[] = {
+        UI::Setting::Boolean(
+            "demo.preview.enabled", "File preview",
+            &g_demoSettings.showPreview,
+            "Show a short text preview after selection"),
+        UI::Setting::Integer(
+            "demo.preview.bytes", "Preview bytes",
+            &g_demoSettings.previewBytes,
+            8, 64, 8, "Number of bytes read from the start of a file"),
+        UI::Setting::Enumeration(
+            "demo.preview.format", "Preview format",
+            &g_demoSettings.previewFormat,
+            previewFormatOptions, 2,
+            "Display selected bytes as text or hexadecimal"),
+        UI::Setting::Boolean(
+            "demo.file-size", "Show file size",
+            &g_demoSettings.showFileSize,
+            "Display the selected file size"),
+        UI::Setting::Action(
+            "demo.reset", "Reset demo settings", DemoResetSettings,
+            "Restore the initial values")
+    };
+    config.settings = settings;
+    config.settingCount = sizeof(settings) / sizeof(settings[0]);
 
-	//Don't forget to do LCD_Refresh after setPixel(); line(); and triangle();
-	LCD_Refresh();
+    config.manageCalculatorLifecycle = true;
 
-	//Example for getKey
-	while(true){
-		uint32_t key1, key2;	//First create variables
-		getKey(&key1, &key2);	//then read the keys
-		if(testKey(key1, key2, KEY_CLEAR)){ //Use testKey() to test if a specific key is pressed
-			break;
-		}
-	}
-
-	calcEnd(); //restore screen and do stuff
+    UI::Application app(config);
+    app.Run();
 }

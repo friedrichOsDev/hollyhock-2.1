@@ -24,7 +24,8 @@ namespace Execs {
 
 		};
 
-		g_execs[g_numExecs++] = exec;
+		if (g_numExecs < MAX_EXECS)
+					g_execs[g_numExecs++] = exec;
 	}
 */
 
@@ -88,7 +89,7 @@ namespace Execs {
 				//Extract Name from the var
 				if (*(file+j) == '\''){ //If it contains a name, add it to hollyhock
 					j++;
-					for (int i = 0; i<100; i++){
+					for (int i = 0; i<99; i++){
 						char ch = *(file+j);
 						j++;
 						if( ch==0 || ch=='\n' || ch=='\r') break; //End of the text
@@ -97,7 +98,7 @@ namespace Execs {
 					if (*(file+j) == '\n' || *(file+j) == '\r' ) j++;
 					if (*(file+j) == '\''){ //If it contains a description, add it to hollyhock
 						j++;
-						for (int i = 0; i<100; i++){
+						for (int i = 0; i<99; i++){
 							char ch = *(file+j);
 							j++;
 							if( ch==0 || ch=='\n' || ch=='\r') break; //End of the text
@@ -106,7 +107,7 @@ namespace Execs {
 						if (*(file+j) == '\n' || *(file+j) == '\r' ) j++;
 						if (*(file+j) == '\''){ //If it contains an author, add it to hollyhock
 							j++;
-							for (int i = 0; i<100; i++){
+							for (int i = 0; i<99; i++){
 								char ch = *(file+j);
 								j++;
 								if( ch==0 || ch=='\n' || ch=='\r') break; //End of the text
@@ -115,7 +116,7 @@ namespace Execs {
 							if (*(file+j) == '\n' || *(file+j) == '\r' ) j++;
 							if (*(file+j) == '\''){ //If it contains a version, add it to hollyhock
 								j++;
-								for (int i = 0; i<100; i++){
+								for (int i = 0; i<99; i++){
 									char ch = *(file+j);
 									j++;
 									if( ch==0 || ch=='\n' || ch=='\r') break; //End of the text
@@ -126,7 +127,8 @@ namespace Execs {
 					}
 				}
 			
-				g_execs[g_numExecs++] = exec;
+				if (g_numExecs < MAX_EXECS)
+					g_execs[g_numExecs++] = exec;
 			}
 			//go to the next entry
 			current++;
@@ -138,6 +140,8 @@ namespace Execs {
     }
     
     EntryPoint RunExec(int i) {
+        if (i < 0 || i >= g_numExecs)
+            return nullptr;
         struct ExecInfo *exec = &g_execs[i];
         //Execute the exec. First load it from the var into the ram at 8CFF0000
         char *buf = (char*) 0x8CFF0000;
