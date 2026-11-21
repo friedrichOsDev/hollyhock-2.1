@@ -281,8 +281,9 @@ Before playback, a decoder MUST verify:
 - `palette_offset` equals 64.
 - `frames_offset = palette_offset + palette_count × 2`.
 - `index_offset` is greater than `frames_offset` and inside the file.
-- Frame records fit before the index.
-- The index fits inside the actual file.
+- Exactly `frame_count` frame records can be parsed between `frames_offset` and `index_offset`.
+- The end offset of the final frame record equals `index_offset` exactly; gaps and trailing bytes before the index are invalid.
+- The index fits inside the actual file and ends exactly at end-of-file.
 - The sum of frame durations equals `duration_ms`.
 
 All offset and size calculations MUST be checked for overflow before use.
@@ -638,6 +639,8 @@ Entries MUST be ordered by increasing frame number, elapsed time, and file offse
 
 The index MUST contain an entry for frame zero at elapsed time zero.
 
+For every entry, `frame_number` and `file_offset` MUST identify the same parsed I-frame record. `elapsed_ms` MUST equal the sum of the durations of all preceding stored frame records.
+
 The number of entries MUST equal the number of I-frames.
 
 The index size is:
@@ -893,7 +896,9 @@ When the encoded image is displayed 1:1 and the LCD VRAM provides a stable RGB56
 - No second full-size RAM framebuffer is required.
 - The LCD SHOULD be refreshed after the complete frame has been decoded.
 
-If the player applies scaling, rotation, cropping, overlays, or a display mapping that cannot act as a stable reference surface, it MUST use another persistent image buffer or an equivalent reconstruction surface.
+If the player applies scaling, rotation, cropping, or a display mapping that cannot act as a stable reference surface, it MUST use another persistent image buffer or an equivalent reconstruction surface.
+
+Any pause icon, text, cursor, or other overlay drawn into a VRAM reference surface MUST be removed or restored before decoding continues. Otherwise, a later SKIP packet would preserve the overlay as if it were video content. A player SHOULD draw overlays in a separate layer or save and restore the affected pixels.
 
 ### 15.5 Display timing
 
@@ -1130,9 +1135,9 @@ This removes dependence on an assumed initial screen colour and enables bounded 
 
 ### 22.3 Safer sizes and dimensions
 
-The legacy header used one-byte width and height fields and a 16-bit frame-size field. Those limits are not sufficient for the 528 × 320 target.
+The legacy header used one-byte width and height fields, a 16-bit frame-size field, and did not define indexed keyframes. Those constraints make large frames and bounded seeking difficult. The legacy encoder also accumulated the complete compressed video in a growing memory buffer and repeatedly reallocated it.
 
-CPV v1 uses 16-bit dimensions and a 32-bit payload size. It also validates offsets, frame boundaries, and index entries.
+CPV v1 uses 16-bit dimensions, a 32-bit payload size, explicit I-frames, a keyframe index, and streamed output. It also validates offsets, frame boundaries, packet coverage, and index entries.
 
 ### 22.4 Faster encoder mapping
 
