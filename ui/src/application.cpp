@@ -402,7 +402,9 @@ void Adjust(Setting &s, Application &app, int direction = 1) {
     }
 }
 
-} // namespace\n\nApplication::Application(const Config &config)
+} // namespace
+
+Application::Application(const Config &config)
     : m_config(),
       m_state(StateMainMenu),
       m_lifecycleStarted(false),
