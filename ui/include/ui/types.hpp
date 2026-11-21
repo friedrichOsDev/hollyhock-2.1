@@ -4,6 +4,12 @@ namespace UI {
 
 class Application;
 
+enum class MenuRenderer {
+    Native,
+    Framebuffer,
+    Custom
+};
+
 typedef void (*ActionCallback)(Application &);
 typedef void (*FileCallback)(Application &, const char *);
 
@@ -68,9 +74,21 @@ struct Config {
     bool showQuit;
     bool manageCalculatorLifecycle;
 
+    // Select the presentation backend independently for each built-in menu.
+    // Custom mode invokes the corresponding onCustom... callback.
+    MenuRenderer mainMenuRenderer;
+    MenuRenderer fileSelectorRenderer;
+    MenuRenderer settingsRenderer;
+
     ActionCallback onStart;
     ActionCallback onSettings;
     FileCallback onFileSelected;
+
+    // Custom renderers own both drawing and input handling. Application
+    // continues to own lifecycle, persistence, and menu-state transitions.
+    ActionCallback onCustomMainMenu;
+    ActionCallback onCustomFileSelector;
+    ActionCallback onCustomSettings;
 
     const FileFilter *filters;
     int filterCount;
