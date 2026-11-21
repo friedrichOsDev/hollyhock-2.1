@@ -550,7 +550,7 @@ A DELTA_MASK packet represents a mixed span containing both unchanged and change
 
 Mask bits are least-significant-bit first. A set bit means that pixel is changed and the decoder reads one palette index for it. A clear bit means the pixel is unchanged and the decoder leaves the reference pixel untouched. The number of following indices is the population count of the first `span_length` mask bits. Unused high mask bits and unused high bits in the final packed-index byte MUST be zero.
 
-DELTA_MASK is valid only in P-frames. It cannot contain RAW565 pixels; the encoder MUST split out direct-colour pixels into ordinary RAW565 packets. A decoder MUST reject a zero span, a span that exceeds the remaining frame pixels, truncated mask or index data, invalid palette indices, non-zero padding bits, and any DELTA_MASK in an I-frame.
+DELTA_MASK MUST contain at least one set bit and at least one clear bit; all-clear and all-set spans MUST use ordinary SKIP or data packets. DELTA_MASK is valid only in P-frames. It cannot contain RAW565 pixels; the encoder MUST split out direct-colour pixels into ordinary RAW565 packets. A decoder MUST reject a zero span, a span that exceeds the remaining frame pixels, truncated mask or index data, invalid palette indices, non-zero padding bits, and any DELTA_MASK in an I-frame.
 
 The encoder SHOULD compare the complete encoded size of the mask form against the ordinary sequence of SKIP and data packets, including all headers. It MUST emit DELTA_MASK only when the mask form is strictly smaller. This avoids adding overhead to simple motion or contiguous changed regions.
 
@@ -877,10 +877,21 @@ A decoder SHOULD:
 
 ### 15.2 Packet decoder pseudocode
 
+First, resolve the frame payload. If the LZ4 flag is clear, use the stored payload as-is. If it is set, read and validate the four-byte uncompressed-size prefix, decompress exactly one independent LZ4 block, and parse the resulting packet stream. The packet reader then operates only on that bounded, uncompressed stream.
+
 ```text
+if frame_flags & FRAME_FLAG_LZ4:
+    require minor_version >= 1
+    uncompressed_size = read_u32_le()
+    require 1 <= uncompressed_size <= 3 * width * height
+    packet_stream = lz4_decompress_exactly(remaining_payload, uncompressed_size)
+else:
+    require frame_flags == 0
+    packet_stream = stored_payload
+
 pixel_position = 0
 
-while frame_payload_bytes_remaining > 0:
+while packet_stream_bytes_remaining > 0:
     first = read_u8()
     opcode = first >> 6
 
@@ -935,15 +946,7 @@ while frame_payload_bytes_remaining > 0:
                 pixel_position += 1
 
 require pixel_position == width * height
-require frame_payload_bytes_remaining == 0
-
-Before packet parsing, if frame flag bit 0 is set:
-    require minor_version >= 1
-    uncompressed_size = read_u32_le()
-    require uncompressed_size <= 3 * width * height
-    packet_stream = lz4_decompress_exactly(remaining_payload, uncompressed_size)
-otherwise:
-    packet_stream = stored_payload
+require packet_stream_bytes_remaining == 0
 ```
 
 A production decoder MUST check the remaining frame payload before every read. The pseudocode omits those repeated bounds checks for readability.
@@ -952,7 +955,7 @@ A production decoder MUST check the remaining frame payload before every read. T
 
 The calculator decoder SHOULD read packet data from a buffered file stream. It SHOULD NOT allocate a buffer as large as the entire compressed frame unless the platform's file API makes streaming impractical.
 
-For INDEX_LITERAL, indices can be consumed sequentially. For INDEX_REPEAT, one colour is read and written repeatedly. For SKIP, the pixel cursor advances without writing. For RAW565, values are read and copied sequentially.
+INDEX_LITERAL and DELTA_MASK indices are unpacked using the palette-dependent bit width. INDEX_REPEAT reads one byte and writes one colour repeatedly. SKIP advances the pixel cursor without writing. DELTA_MASK reads its bitmap and applies only the changed indices. RAW565 reads and copies little-endian RGB565 values sequentially.
 
 ### 15.4 Using LCD memory as the reference surface
 
