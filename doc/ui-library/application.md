@@ -94,7 +94,7 @@ Persistence is optional. Set config.settingsFolder to a unique MCS folder name f
 
 For example, the demo uses UIDEMO and ui_test uses UITEST. Give every application a distinct, stable folder name. The folder is created automatically on first run.
 
-When settingsFolder is set, UI::Application loads saved settings before showing the first menu. It saves settings after a settings entry is selected and once again when Run() exits normally. If the SETTINGS variable does not exist yet, current defaults are retained and will be saved after the first settings change or on exit.
+When settingsFolder is set, UI::Application loads saved settings before showing the first menu. It saves settings after a settings entry is selected and once again when Run() exits normally. When the SETTINGS variable does not exist yet, the library now immediately writes the application's default settings to MCS during startup. This creates a visible SETTINGS variable on the first launch rather than waiting for the first settings interaction or application exit.
 
 The automatic settings serializer supports Boolean, Integer, and Enumeration settings plus Action entries (actions have no stored value). It currently supports up to 32 entries and a serialized payload smaller than 512 bytes. The saved data is versioned; incompatible or invalid data is rejected rather than copied into application variables.
 
