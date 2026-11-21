@@ -79,9 +79,10 @@ was compiled into the metadata; edit it separately with `hhkmeta.py` if desired.
 
 ## Limits and safety
 
-- The scanner recognizes printable ASCII strings terminated by NUL. It does
-  not currently decode UTF-16, compressed/encrypted data, or runtime-built
-  strings, and it cannot prove that a program has no other filename dependency.
+- The scanner recognizes printable ASCII strings terminated by NUL and matches
+  the filename case-insensitively. It does not currently decode UTF-16,
+  compressed/encrypted data, or runtime-built strings, and it cannot prove that
+  a program has no other filename dependency.
 - A match is changed only when it appears as a complete filename token,
   avoiding incidental matches inside longer words.
 - Replacement strings must be ASCII basenames. Directory components are not
