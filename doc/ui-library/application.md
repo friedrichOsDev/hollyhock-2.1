@@ -120,7 +120,7 @@ config.onCustomFileSelector = CustomFiles;
 
 `CurrentDirectory()` returns the current selector path. `SetCurrentDirectory()` normalizes and stores a path and ensures it ends in a backslash; it does not test whether the directory exists. `SelectFile()` is valid while the application is in the file-selector state. It returns zero on success or a negative error code for an invalid state or path. The selected path passed to `onFileSelected` is valid for the duration of that callback.
 
-## Callbacks## Callbacks
+## Callbacks
 
 ~~~cpp
 typedef void (*ActionCallback)(Application &app);
