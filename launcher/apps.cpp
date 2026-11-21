@@ -21,12 +21,23 @@ public:
 
 	int open(const char *path, int flags) {
 		m_fd = ::open(path, flags);
-		m_opened = true;
+		m_opened = m_fd >= 0;
 		return m_fd;
 	}
 
 	int getAddr(int offset, const void **addr) {
 		return ::getAddr(m_fd, offset, addr);
+	}
+
+	int getSize(uint32_t *size) {
+		if (!size || !m_opened)
+			return EINVAL;
+		struct stat info;
+		int result = ::fstat(m_fd, &info);
+		if (result < 0)
+			return result;
+		*size = info.fileSize;
+		return 0;
 	}
 
 private:
@@ -48,7 +59,7 @@ public:
 
 	int findFirst(const wchar_t *path, wchar_t *name, struct findInfo *findInfoBuf) {
 		int ret = ::findFirst(path, &m_findHandle, name, findInfoBuf);
-		m_opened = true;
+		m_opened = ret >= 0;
 		return ret;
 	}
 
@@ -71,78 +82,99 @@ namespace Apps {
     struct AppInfo g_apps[MAX_APPS];
     int g_numApps;
 
-    const Elf32_Ehdr *LoadELF(File f, const Elf32_Shdr **sectionHeaders) {
-        const Elf32_Ehdr *elf;
-        int ret = f.getAddr(0, (const void **) &elf);
-        if (ret < 0) {
-            return nullptr;
+    bool SectionNameEquals(const char *table, uint32_t tableSize,
+                           uint32_t offset, const char *expected) {
+        if (!table || !expected || offset >= tableSize)
+            return false;
+        uint32_t index = 0;
+        while (expected[index]) {
+            if (index >= tableSize - offset ||
+                table[offset + index] != expected[index])
+                return false;
+            ++index;
         }
+        return offset + index < tableSize && table[offset + index] == 0;
+    }
 
-        // Check magic number
-        if (!(
-            elf->e_ident[EI_MAG0] == ELFMAG0 &&
-            elf->e_ident[EI_MAG1] == ELFMAG1 &&
-            elf->e_ident[EI_MAG2] == ELFMAG2 &&
-            elf->e_ident[EI_MAG3] == ELFMAG3
-        )) {
-            return nullptr;
+    void CopySectionText(char *destination, int capacity,
+                         const char *source, uint32_t sourceSize) {
+        if (!destination || capacity <= 0)
+            return;
+        uint32_t index = 0;
+        while (index < sourceSize && index < static_cast<uint32_t>(capacity - 1) &&
+               source[index]) {
+            destination[index] = source[index];
+            ++index;
         }
+        destination[index] = 0;
+    }
 
-        // Check file class
-        if (elf->e_ident[EI_CLASS] != ELFCLASS32) {
+    const Elf32_Ehdr *LoadELF(File &f, const Elf32_Shdr **sectionHeaders,
+                              uint32_t *fileSize) {
+        if (!sectionHeaders || !fileSize)
             return nullptr;
-        }
 
-        // Check data encoding
-        if (elf->e_ident[EI_DATA] != ELFDATA2MSB) {
+        const Elf32_Ehdr *elf = nullptr;
+        if (f.getSize(fileSize) < 0 || *fileSize < sizeof(Elf32_Ehdr) ||
+            f.getAddr(0, reinterpret_cast<const void **>(&elf)) < 0 || !elf)
             return nullptr;
-        }
 
-        // Check ELF version
-        if (elf->e_ident[EI_VERSION] != EV_CURRENT) {
+        if (!(elf->e_ident[EI_MAG0] == ELFMAG0 &&
+              elf->e_ident[EI_MAG1] == ELFMAG1 &&
+              elf->e_ident[EI_MAG2] == ELFMAG2 &&
+              elf->e_ident[EI_MAG3] == ELFMAG3))
             return nullptr;
-        }
+        if (elf->e_ident[EI_CLASS] != ELFCLASS32 ||
+            elf->e_ident[EI_DATA] != ELFDATA2MSB ||
+            elf->e_ident[EI_VERSION] != EV_CURRENT ||
+            elf->e_ident[EI_OSABI] != ELFOSABI_SYSV ||
+            elf->e_type != ET_EXEC ||
+            elf->e_machine != EM_SH ||
+            elf->e_version != EV_CURRENT)
+            return nullptr;
 
-        // Check ABI (ignore ABI version EI_ABIVERSION)
-        if (elf->e_ident[EI_OSABI] != ELFOSABI_SYSV) {
+        if (elf->e_shentsize != sizeof(Elf32_Shdr) ||
+            elf->e_shnum == 0 ||
+            elf->e_shstrndx >= elf->e_shnum ||
+            elf->e_shoff > *fileSize ||
+            elf->e_shnum > (*fileSize - elf->e_shoff) / sizeof(Elf32_Shdr))
             return nullptr;
-        }
-
-        // Check ELF is an executable file
-        if (elf->e_type != ET_EXEC) {
-            return nullptr;
-        }
-
-        // Check machine
-        if (elf->e_machine != EM_SH) {
-            return nullptr;
-        }
-
-        // Check version
-        if (elf->e_version != EV_CURRENT) {
-            return nullptr;
-        }
 
         *sectionHeaders = reinterpret_cast<const Elf32_Shdr *>(
-            reinterpret_cast<const uint8_t *>(elf) + elf->e_shoff
-        );
+            reinterpret_cast<const uint8_t *>(elf) + elf->e_shoff);
+
+        const Elf32_Shdr *strings = &(*sectionHeaders)[elf->e_shstrndx];
+        if (strings->sh_type != SHT_STRTAB ||
+            strings->sh_offset > *fileSize ||
+            strings->sh_size > *fileSize - strings->sh_offset)
+            return nullptr;
+
+        for (uint32_t i = 0; i < elf->e_shnum; ++i) {
+            const Elf32_Shdr *section = &(*sectionHeaders)[i];
+            if (section->sh_type != SHT_NOBITS &&
+                section->sh_type != SHT_NULL &&
+                (section->sh_offset > *fileSize ||
+                 section->sh_size > *fileSize - section->sh_offset))
+                return nullptr;
+            if (section->sh_type != SHT_NULL &&
+                section->sh_name >= strings->sh_size)
+                return nullptr;
+        }
 
         return elf;
     }
 
 	void LoadApp(const char *folder, wchar_t *fileName) {
+		if (g_numApps >= MAX_APPS)
+			return;
 		struct AppInfo app;
 		memset(&app, 0, sizeof(app));
 
 		// copy the file name (converting to a non-wide string in the
 		// process)
-		for (int i = 0; i < 100; ++i) {
-			wchar_t c = fileName[i];
-			app.fileName[i] = c;
-			if (c == 0x0000) {
-				break;
-			}
-		}
+		for (int i = 0; i < 99 && fileName[i] != 0; ++i)
+			app.fileName[i] = static_cast<char>(fileName[i]);
+		app.fileName[99] = 0;
 
 		// build the path
 		//strcat(app.path, "\\fls0\\");
@@ -155,14 +187,18 @@ namespace Apps {
 			return;
 		}
 
-		const Elf32_Shdr *sectionHeaders;
-		const Elf32_Ehdr *elf = LoadELF(f, &sectionHeaders);
+		const Elf32_Shdr *sectionHeaders = nullptr;
+		uint32_t fileSize = 0;
+		const Elf32_Ehdr *elf = LoadELF(f, &sectionHeaders, &fileSize);
 
 		if (elf == nullptr) {
 			return;
 		}
 
 		const Elf32_Shdr *sectionHeaderStringTable = &sectionHeaders[elf->e_shstrndx];
+		const char *stringTable = reinterpret_cast<const char *>(
+			reinterpret_cast<const uint8_t *>(elf) +
+			sectionHeaderStringTable->sh_offset);
 		for (int i = 0; i < elf->e_shnum; ++i) {
 			const Elf32_Shdr *sectionHeader = &sectionHeaders[i];
 
@@ -171,25 +207,35 @@ namespace Apps {
 				continue;
 			}
 
-			const char *sectionName = reinterpret_cast<const char *>(
-				reinterpret_cast<const uint8_t *>(elf) +
-				sectionHeaderStringTable->sh_offset +
-				sectionHeader->sh_name
-			);
+			if (sectionHeader->sh_type != SHT_PROGBITS)
+				continue;
 
 			const char *sectionData = reinterpret_cast<const char *>(
 				reinterpret_cast<const uint8_t *>(elf) +
-				sectionHeader->sh_offset
-			);
+				sectionHeader->sh_offset);
 
-			if (strcmp(sectionName, ".hollyhock_name") == 0) {
-				strcat(app.name, sectionData);
-			} else if (strcmp(sectionName, ".hollyhock_description") == 0) {
-				strcat(app.description, sectionData);
-			} else if (strcmp(sectionName, ".hollyhock_author") == 0) {
-				strcat(app.author, sectionData);
-			} else if (strcmp(sectionName, ".hollyhock_version") == 0) {
-				strcat(app.version, sectionData);
+			if (SectionNameEquals(stringTable, sectionHeaderStringTable->sh_size,
+			                      sectionHeader->sh_name, ".hollyhock_name")) {
+				CopySectionText(app.name, sizeof(app.name), sectionData,
+				                sectionHeader->sh_size);
+			} else if (SectionNameEquals(stringTable,
+			                            sectionHeaderStringTable->sh_size,
+			                            sectionHeader->sh_name,
+			                            ".hollyhock_description")) {
+				CopySectionText(app.description, sizeof(app.description),
+				                sectionData, sectionHeader->sh_size);
+			} else if (SectionNameEquals(stringTable,
+			                            sectionHeaderStringTable->sh_size,
+			                            sectionHeader->sh_name,
+			                            ".hollyhock_author")) {
+				CopySectionText(app.author, sizeof(app.author), sectionData,
+				                sectionHeader->sh_size);
+			} else if (SectionNameEquals(stringTable,
+			                            sectionHeaderStringTable->sh_size,
+			                            sectionHeader->sh_name,
+			                            ".hollyhock_version")) {
+				CopySectionText(app.version, sizeof(app.version), sectionData,
+				                sectionHeader->sh_size);
 			}
 		}
 
@@ -228,6 +274,8 @@ namespace Apps {
 	}
 
     EntryPoint RunApp(int i) {
+        if (i < 0 || i >= g_numApps)
+            return nullptr;
         struct AppInfo *app = &g_apps[i];
 
         File f;
@@ -236,8 +284,9 @@ namespace Apps {
             return nullptr;
         }
 
-        const Elf32_Shdr *sectionHeaders;
-        const Elf32_Ehdr *elf = LoadELF(f, &sectionHeaders);
+        const Elf32_Shdr *sectionHeaders = nullptr;
+        uint32_t fileSize = 0;
+        const Elf32_Ehdr *elf = LoadELF(f, &sectionHeaders, &fileSize);
 
 		if (elf == nullptr) {
 			return nullptr;

@@ -1,54 +1,57 @@
+ifneq ($(strip $(MAKECMDGOALS)),clean)
 ifndef SDK_DIR
-$(error You need to define the SDK_DIR environment variable, and point it to the sdk/ folder)
+$(error You must define SDK_DIR and point it to the sdk/ folder)
 endif
+endif
+UI_DIR ?= ../ui
 
-AS:=sh4-elf-as
-AS_FLAGS:=
+AS := sh4-elf-as
+CC := sh4-elf-gcc
+CXX := sh4-elf-g++
+LD := sh4-elf-ld
+READELF := sh4-elf-readelf
 
-CC:=sh4-elf0-gcc
-CC_FLAGS:=-ffreestanding -fshort-wchar -Wall -Wextra -O2 -I $(SDK_DIR)/include/
+AS_FLAGS :=
+CC_FLAGS := -ffreestanding -fshort-wchar -Wall -Wextra -O2 -I$(SDK_DIR)/include/
+DEPFLAGS := -MMD -MP
+CXX_FLAGS := -ffreestanding -fno-exceptions -fno-rtti -fshort-wchar \
+             -Wall -Wextra -O2 -m4a-nofpu \
+             -I$(SDK_DIR)/include/ -I$(UI_DIR)/include
+LD_FLAGS := -nostdlib --no-undefined
 
-CXX:=sh4-elf-g++
-CXX_FLAGS:=-ffreestanding -fno-exceptions -fno-rtti -fshort-wchar -Wall -Wextra -O2 -I $(SDK_DIR)/include/
-
-LD:=sh4-elf-ld
-LD_FLAGS:=-nostdlib --no-undefined
-
-READELF:=sh4-elf-readelf
-OBJCOPY:=sh4-elf-objcopy
-
-AS_SOURCES:=$(wildcard *.s)
-CC_SOURCES:=$(wildcard *.c)
-CXX_SOURCES:=$(wildcard *.cpp)
-OBJECTS:=$(AS_SOURCES:.s=.o) $(CC_SOURCES:.c=.o) $(CXX_SOURCES:.cpp=.o)
+AS_SOURCES := $(wildcard *.s)
+CC_SOURCES := $(wildcard *.c)
+CXX_SOURCES := $(wildcard *.cpp)
+OBJECTS := $(AS_SOURCES:.s=.o) $(CC_SOURCES:.c=.o) $(CXX_SOURCES:.cpp=.o)
+DEPFILES := $(CC_SOURCES:.c=.d) $(CXX_SOURCES:.cpp=.d)
+LIBS := $(SDK_DIR)/sdk.o $(UI_DIR)/ui.o
 
 all: run.bin Makefile
-
 clean:
-	rm -f $(OBJECTS) run.bin
+	rm -f $(OBJECTS) $(DEPFILES) run.bin
 
-run.bin: $(OBJECTS) $(SDK_DIR)/sdk.o linker.ld
-	$(LD) -T linker.ld -o $@ $(LD_FLAGS) $(OBJECTS) $(SDK_DIR)/sdk.o
+run.bin: $(OBJECTS) $(LIBS) linker.ld
+	$(LD) -T linker.ld -o $@ $(LD_FLAGS) $(OBJECTS) $(LIBS)
 
-# We're not actually building sdk.o, just telling the user they need to do it
-# themselves. Just using the target to trigger an error when the file is
-# required but does not exist.
+# SDK remains an explicit prerequisite, matching the previous build workflow.
 $(SDK_DIR)/sdk.o:
-	$(error You need to build the SDK before using it. Run make in the SDK directory, and check the README.md in the SDK directory for more information)
+	$(error SDK object not found. Build it first with: make -C $(SDK_DIR))
+
+# Keep the UI library synchronized for direct make -C launcher builds.
+.PHONY: FORCE_UI
+FORCE_UI:
+$(UI_DIR)/ui.o: FORCE_UI
+	$(MAKE) -C $(UI_DIR) SDK_DIR=$(abspath $(SDK_DIR))
 
 %.o: %.s
 	$(AS) $< -o $@ $(AS_FLAGS)
-
 %.o: %.c
-	$(CC) $< -o $@ $(CC_FLAGS)
-
-# Break the build if global constructors are present:
-# Read the sections from the object file (with readelf -S) and look for any
-# called .ctors - if they exist, give the user an error message, delete the
-# object file (so that on subsequent runs of make the build will still fail)
-# and exit with an error code to halt the build.
+	$(CC) -c $< -o $@ $(CC_FLAGS) $(DEPFLAGS)
 %.o: %.cpp
-	$(CXX) -c $< -o $@ $(CXX_FLAGS)
-	@$(READELF) $@ -S | grep ".ctors" > /dev/null && echo "ERROR: Global constructors aren't supported." && rm $@ && exit 1 || exit 0
+	$(CXX) -c $< -o $@ $(CXX_FLAGS) $(DEPFLAGS)
+	@$(READELF) $@ -S | grep -F ".ctors" > /dev/null && echo "ERROR: Global constructors aren't supported." && rm $@ && exit 1 || exit 0
+
+main.o screen.o: screen.hpp
+-include $(DEPFILES)
 
 .PHONY: all clean

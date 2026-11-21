@@ -31,12 +31,23 @@ public:
 
 	int open(const char *path, int flags) {
 		m_fd = ::open(path, flags);
-		m_opened = true;
+		m_opened = m_fd >= 0;
 		return m_fd;
 	}
 
 	int getAddr(int offset, const void **addr) {
 		return ::getAddr(m_fd, offset, addr);
+	}
+
+	int getSize(uint32_t *size) {
+		if (!size || !m_opened)
+			return EINVAL;
+		struct stat info;
+		int result = ::fstat(m_fd, &info);
+		if (result < 0)
+			return result;
+		*size = info.fileSize;
+		return 0;
 	}
 
 	int read(void *buf, int count) {
@@ -62,7 +73,7 @@ public:
 
 	int findFirst(const wchar_t *path, wchar_t *name, struct findInfo *findInfoBuf) {
 		int ret = ::findFirst(path, &m_findHandle, name, findInfoBuf);
-		m_opened = true;
+		m_opened = ret >= 0;
 		return ret;
 	}
 
@@ -76,6 +87,35 @@ private:
 };
 
 namespace Bins {
+    namespace {
+    bool CopyMetadataField(char *destination, int capacity,
+                           const char **cursor, uint32_t *remaining) {
+        if (!destination || capacity <= 0 || !cursor || !*cursor ||
+            !remaining)
+            return false;
+
+        int written = 0;
+        while (*remaining > 0 && **cursor != 0) {
+            if (written < capacity - 1)
+                destination[written++] = **cursor;
+            ++(*cursor);
+            --(*remaining);
+        }
+        destination[written] = 0;
+        if (*remaining == 0)
+            return false;
+
+        // Consume the terminator and skip empty fields, matching the legacy
+        // BIN metadata parser while ensuring every read stays in file bounds.
+        ++(*cursor);
+        --(*remaining);
+        while (*remaining > 0 && **cursor == 0) {
+            ++(*cursor);
+            --(*remaining);
+        }
+        return true;
+    }
+    }
 	const char *BIN_FOLDER[] = {
 		"\\fls0\\",
 		"\\drv0\\"
@@ -86,18 +126,16 @@ namespace Bins {
     int g_numApps;
 
 	void LoadApp(const char *folder, wchar_t *fileName) {
+		if (g_numApps >= MAX_APPS)
+			return;
 		struct AppInfo app;
 		memset(&app, 0, sizeof(app));
 
 		// copy the file name (converting to a non-wide string in the
 		// process)
-		for (int i = 0; i < 100; ++i) {
-			wchar_t c = fileName[i];
-			app.fileName[i] = c;
-			if (c == 0x0000) {
-				break;
-			}
-		}
+		for (int i = 0; i < 99 && fileName[i] != 0; ++i)
+			app.fileName[i] = static_cast<char>(fileName[i]);
+		app.fileName[99] = 0;
 
 		// build the path
 		//strcat(app.path, "\\fls0\\");
@@ -109,21 +147,30 @@ namespace Bins {
 		if (ret < 0) {
 			return;
 		}
-		char *binInfo;
-		f.getAddr(0x10, (const void**)&binInfo);
+		uint32_t fileSize = 0;
+		if (f.getSize(&fileSize) < 0 || fileSize <= 0x10)
+			return;
 
-		if(*binInfo>=32&&*binInfo<127){
-			for(int i=0;*binInfo!=0;i++)
-				app.name[i] = *(binInfo++);
-			while(*binInfo==0)binInfo++;
-			for(int i=0;*binInfo!=0;i++)
-				app.description[i] = *(binInfo++);
-			while(*binInfo==0)binInfo++;
-			for(int i=0;*binInfo!=0;i++)
-				app.author[i] = *(binInfo++);
-			while(*binInfo==0)binInfo++;
-			for(int i=0;*binInfo!=0;i++)
-				app.version[i] = *(binInfo++);
+		const char *binInfo = 0;
+		if (f.getAddr(0x10, reinterpret_cast<const void **>(&binInfo)) < 0 ||
+		    !binInfo)
+			return;
+
+		if (*binInfo >= 32 && *binInfo < 127) {
+			const char *cursor = binInfo;
+			uint32_t remaining = fileSize - 0x10;
+			if (!CopyMetadataField(app.name, sizeof(app.name),
+			                       &cursor, &remaining))
+				return;
+			if (remaining > 0)
+				CopyMetadataField(app.description, sizeof(app.description),
+				                 &cursor, &remaining);
+			if (remaining > 0)
+				CopyMetadataField(app.author, sizeof(app.author),
+				                 &cursor, &remaining);
+			if (remaining > 0)
+				CopyMetadataField(app.version, sizeof(app.version),
+				                 &cursor, &remaining);
 		}
 		g_apps[g_numApps++] = app;
 	}
@@ -152,12 +199,16 @@ namespace Bins {
 			int ret = find.findFirst(findDir, fileName, &findInfoBuf);
 			while (ret >= 0) {
 				if (findInfoBuf.type == findInfoBuf.EntryTypeFile) {
-					const char* exclude = "run.bin";
-					char different = 0;
-					for(unsigned int i=0;i<sizeof(exclude);i++) different|=(exclude[i]^fileName[i]);
-					if(different){
-						LoadApp(BIN_FOLDER[dirNr],fileName);
+					const char exclude[] = "run.bin";
+					bool isLauncher = true;
+					for (unsigned int i = 0; i < sizeof(exclude); ++i) {
+						if (fileName[i] != exclude[i]) {
+							isLauncher = false;
+							break;
+						}
 					}
+					if (!isLauncher)
+						LoadApp(BIN_FOLDER[dirNr], fileName);
 				}
 				ret = find.findNext(fileName, &findInfoBuf);
 			}
@@ -165,6 +216,8 @@ namespace Bins {
 	}
 
 	EntryPoint RunApp(int i) {
+		if (i < 0 || i >= g_numApps)
+			return nullptr;
 		struct AppInfo *app = &g_apps[i];
 
 		File f;
@@ -173,13 +226,16 @@ namespace Bins {
 		    return nullptr;
 		}
 		//get address where the program should be loaded
-		unsigned char* address;
-		f.getAddr(0x0c, (const void**)&address);
+		unsigned char *address = 0;
+		if (f.getAddr(0x0c, (const void **)&address) < 0 || !address)
+			return nullptr;
 		EntryPoint entrypoint = (EntryPoint)0x8cff0000;
 		if (address[0]==0x8c)
 				entrypoint = (EntryPoint)((address[0]<<24) + (address[1]<<16) + (address[2]<<8) + (address[3]));
 
-		int length = f.read((void*)entrypoint,0x20000);
+		int length = f.read((void *)entrypoint, 0x20000);
+		if (length <= 0)
+			return nullptr;
 		//unsigned char mode[] = {0,5,0,0,0,0};
 		//Serial_Open(mode);
 		//Serial_print("The length is: 0x");
