@@ -21,8 +21,8 @@ echo "UI:       $UI_DIR"
 echo
 echo "==> Building SDK..."
 make -C "$SDK_DIR"
-echo "==> Building UI library..."
-make -C "$UI_DIR" SDK_DIR="$SDK_DIR"
+echo "==> Building UI framebuffer/input subset..."
+make -C "$UI_DIR" SDK_DIR="$SDK_DIR" ui-launcher.o
 echo "==> Building launcher..."
 if [[ "$#" -eq 0 ]]; then
     make -C "$LAUNCHER_DIR" SDK_DIR="$SDK_DIR" UI_DIR="$UI_DIR" all

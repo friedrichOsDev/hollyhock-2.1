@@ -24,7 +24,7 @@ CC_SOURCES := $(wildcard *.c)
 CXX_SOURCES := $(wildcard *.cpp)
 OBJECTS := $(AS_SOURCES:.s=.o) $(CC_SOURCES:.c=.o) $(CXX_SOURCES:.cpp=.o)
 DEPFILES := $(CC_SOURCES:.c=.d) $(CXX_SOURCES:.cpp=.d)
-LIBS := $(SDK_DIR)/sdk.o $(UI_DIR)/ui.o
+LIBS := $(SDK_DIR)/sdk.o $(UI_DIR)/ui-launcher.o
 
 all: run.bin Makefile
 clean:
@@ -40,8 +40,8 @@ $(SDK_DIR)/sdk.o:
 # Keep the UI library synchronized for direct make -C launcher builds.
 .PHONY: FORCE_UI
 FORCE_UI:
-$(UI_DIR)/ui.o: FORCE_UI
-	$(MAKE) -C $(UI_DIR) SDK_DIR=$(abspath $(SDK_DIR))
+$(UI_DIR)/ui-launcher.o: FORCE_UI
+	$(MAKE) -C $(UI_DIR) SDK_DIR=$(abspath $(SDK_DIR)) ui-launcher.o
 
 %.o: %.s
 	$(AS) $< -o $@ $(AS_FLAGS)

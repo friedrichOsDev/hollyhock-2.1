@@ -20,8 +20,14 @@ ui.o: $(OBJECTS)
 %.o: %.cpp
 	$(CXX) -c $< -o $@ $(CXXFLAGS) $(DEPFLAGS)
 
+
+# A small UI subset for the low-level launcher. It intentionally contains only
+# direct framebuffer drawing and normalized input; normal apps still link ui.o.
+ui-launcher.o: src/framebuffer.o src/input.o
+	$(LD) -nostdlib -r -o $@ $^
+
 clean:
-	rm -f $(OBJECTS) $(DEPFILES) ui.o
+	rm -f $(OBJECTS) $(DEPFILES) ui.o ui-launcher.o
 
 -include $(DEPFILES)
 

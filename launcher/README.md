@@ -20,6 +20,8 @@ produces run.bin and retains its existing linker/bootstrap arrangement.
 ## UI controls
 
 The screen is rendered by UI::Framebuffer; events are read through UI::Input.
+The launcher links only these two low-level UI components, not the larger
+UI::Application menu/settings implementation.
 
 - Up / Down: select a program.
 - Left / Right: move one visible page backward / forward.
@@ -40,8 +42,9 @@ From the repository root:
 ./launcher/build.sh
 ~~~
 
-This builds the SDK, the UI Library, and the launcher in that order. It does
-not invoke or depend on app_template. The output is launcher/run.bin.
+This builds the SDK, the launcher's small UI framebuffer/input subset, and the
+launcher in that order. It does not invoke or depend on app_template, and it
+does not link the full application/menu framework. The output is launcher/run.bin.
 
 To remove only launcher build outputs:
 
@@ -56,7 +59,7 @@ The equivalent manual build is:
 
 ~~~sh
 make -C sdk
-make -C ui SDK_DIR=../sdk
+make -C ui SDK_DIR=../sdk ui-launcher.o
 make -C launcher SDK_DIR=../sdk UI_DIR=../ui
 ~~~
 
@@ -65,10 +68,11 @@ build convention. UI_DIR defaults to ../ui.
 
 ## Lifecycle boundary
 
-The launcher is a low-level program started by the OS loader. The UI Library
-manages launcher state and drawing/input, but manageCalculatorLifecycle is
-disabled so the launcher does not take ownership of the calculator lifecycle
-that was previously managed by its environment.
+The launcher is a low-level program started by the OS loader. It uses the
+UI Library's framebuffer and input APIs directly. The OS launcher environment
+continues to own calculator initialization and teardown; this program does
+not call calcInit() or calcEnd(). Framebuffer::Begin() attaches to the LCD VRAM
+already initialized by that environment.
 
 init.s, linker.ld, and main_bootstrap.cpp are unchanged. The bootstrap
 continues to return the SDK message-box result expected by the OS after the

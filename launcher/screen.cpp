@@ -1,4 +1,5 @@
-#include <ui/ui.hpp>
+#include <ui/framebuffer.hpp>
+#include <ui/input.hpp>
 #include "apps.hpp"
 #include "bins.hpp"
 #include "execs.hpp"
@@ -223,36 +224,50 @@ void Render(UI::Framebuffer &fb, int selected, int total,
     fb.Present();
 }
 
-void LaunchSelected(UI::Application &app, UI::Framebuffer &fb,
-                    int selected, char *status, int statusCap) {
+void LaunchSelected(UI::Framebuffer &fb, int selected,
+                    char *status, int statusCap, bool &running) {
     const int apps = AppCount();
     const int bins = BinCount();
     const int total = apps + bins + ExecCount();
-    if (selected < 0 || selected >= total) return;
+    if (selected < 0 || selected >= total)
+        return;
 
     // Detach VRAM before another program takes control of the calculator.
     fb.End();
     if (selected < apps) {
         Apps::EntryPoint entry = Apps::RunApp(selected);
-        if (entry) { entry(); app.Close(); return; }
+        if (entry) {
+            entry();
+            running = false;
+            return;
+        }
     } else if (selected < apps + bins) {
         Bins::EntryPoint entry = Bins::RunApp(selected - apps);
-        if (entry) { entry(); app.Close(); return; }
+        if (entry) {
+            entry();
+            running = false;
+            return;
+        }
     } else {
         Execs::EntryPoint entry = Execs::RunExec(selected - apps - bins);
-        if (entry) { entry(); app.Close(); return; }
+        if (entry) {
+            entry();
+            running = false;
+            return;
+        }
     }
 
     Copy(status, "Could not load the selected program.", statusCap);
-    if (!fb.Begin()) app.Close();
+    if (!fb.Begin())
+        running = false;
 }
 } // namespace
 
-void Run(UI::Application &app) {
+void Run() {
     const int total = TotalCount();
     int selected = total > 0 ? 0 : -1;
     UI::Framebuffer fb;
-    if (!fb.Begin()) { app.Close(); return; }
+    if (!fb.Begin()) return;
 
     int rows = DividePositive(fb.Height() - DETAIL_HEIGHT - LIST_TOP - 6,
                               ROW_HEIGHT);
@@ -263,19 +278,19 @@ void Run(UI::Application &app) {
     char status[72];
     status[0] = 0;
     bool running = true;
-    while (running && app.IsRunning()) {
+    while (running) {
         Render(fb, selected, total, rows, slotWidth, status);
         bool redraw = false;
         UI::Event event;
 
-        while (!redraw && running && app.IsRunning()) {
+        while (!redraw && running) {
             const int result = UI::Input::Poll(&event);
-            if (result < 0) { app.Close(); running = false; break; }
+            if (result < 0) { running = false; break; }
             if (result == 0) continue;
 
             if (event.type == UI::EventSystem &&
                 event.systemEvent == UI::SystemActionBarEscape) {
-                app.Close(); running = false; break;
+                running = false; break;
             }
 
             if (event.type == UI::EventKey && event.keyAction == UI::KeyPressed) {
@@ -295,12 +310,12 @@ void Run(UI::Application &app) {
                     selected = nextPage < total ? nextPage : total - 1;
                     redraw = true;
                 } else if (event.keyCode == UI::KeyEXE) {
-                    LaunchSelected(app, fb, selected, status, sizeof(status));
-                    if (!app.IsRunning()) { running = false; break; }
+                    LaunchSelected(fb, selected, status, sizeof(status), running);
+                    if (!running) break;
                     redraw = true;
                 } else if (event.keyCode == UI::KeyPowerClear ||
                            event.keyCode == UI::KeyBackspace) {
-                    app.Close(); running = false; break;
+                    running = false; break;
                 }
             } else if (event.type == UI::EventTouch &&
                        event.touchAction == UI::TouchDown) {
@@ -324,15 +339,15 @@ void Run(UI::Application &app) {
                         selected = first >= rows ? first - rows : 0;
                         redraw = true;
                     } else if (action == 1) {
-                        LaunchSelected(app, fb, selected, status, sizeof(status));
-                        if (!app.IsRunning()) { running = false; break; }
+                        LaunchSelected(fb, selected, status, sizeof(status), running);
+                        if (!running) break;
                         redraw = true;
                     } else if (action == 2 && total > 0) {
                         const int nextPage = PageStart(selected, rows) + rows;
                         selected = nextPage < total ? nextPage : total - 1;
                         redraw = true;
                     } else if (action == 3) {
-                        app.Close(); running = false; break;
+                        running = false; break;
                     }
                 }
             }
