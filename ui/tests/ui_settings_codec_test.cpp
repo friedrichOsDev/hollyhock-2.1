@@ -37,7 +37,7 @@ int main() {
 
     bool preview = true;
     int bytes = 32;
-    int mode = 2;
+    int mode = 1;
     const char *options[] = {"Text", "Hex"};
 
     UI::Setting original[] = {
@@ -51,7 +51,7 @@ int main() {
     Check(UI::Detail::SerializeSettings(original, 3, buffer, &size),
           "serialize UIST2 settings");
     Check(Equals(buffer,
-          "UIST2;3;11:showPreviewB1;12:previewBytesI32;13:previewFormatE2;"),
+          "UIST2;3;11:showPreviewB1;12:previewBytesI32;13:previewFormatE1;"),
           "serialized data contains stable keys and typed values");
     Check(size == 64U,
           "serialized size includes the terminating null byte");
@@ -71,7 +71,7 @@ int main() {
 
     Check(UI::Detail::ParseSettings(buffer, reordered, 3, &legacy) &&
           !legacy, "load keyed data after reordering settings");
-    Check(loadedPreview && loadedBytes == 32 && loadedMode == 2,
+    Check(loadedPreview && loadedBytes == 32 && loadedMode == 1,
           "reordered settings retain the matching values");
 
     // New keys retain their defaults, and removed keys are ignored.
