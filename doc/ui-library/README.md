@@ -14,6 +14,7 @@ A small C++ helper library for fx-CP400 applications built with the Hollyhock 2.
 ## Features
 
 - Optional built-in Start, Files, Settings, and Quit menu.
+- Independent Native, Framebuffer, or Custom renderer selection for each menu.
 - Custom application screens using Framebuffer and Input.
 - RGB565 drawing directly into LCD VRAM.
 - Bounded pixel, rectangle, line, and text drawing.
@@ -22,6 +23,10 @@ A small C++ helper library for fx-CP400 applications built with the Hollyhock 2.
 - Existing read-only file selector and file-system API.
 - Boolean, integer, enumeration, and action settings.
 - Optional per-application MCS settings persistence.
+
+## Per-menu renderers
+
+The main menu, file selector, and settings screen each default to the original Native SDK GUI. Applications can choose the library's Framebuffer menus or supply Custom callbacks independently. See [Application menus and settings](application.md) for the renderer configuration and custom file-selection API.
 
 ## Custom screens
 
