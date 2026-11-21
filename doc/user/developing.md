@@ -16,7 +16,7 @@ _I would recommend adding `export SDK_DIR="PATH-TO/hollyhock-2/sdk"` to the file
 ## 2. Start your project
 Copy the contents of the `app_template/` directory to an empty folder. This will become your project's root directory.
 
-Open `main.cpp` in your favourite text editor, and edit the strings in the `APP_NAME`, `APP_DESCRIPTION`, `APP_AUTHOR` and `APP_VERSION` macro calls to match your application. These are the strings that will be displayed in the launcher when your application is selected. If you don't wish to provide one or more of these fields, simply delete the line (they're all optional).
+Open `main.cpp` in your favourite text editor, and edit the strings in the `APP_NAME`, `APP_DESCRIPTION`, `APP_AUTHOR` and `APP_VERSION` macro calls to match your application. These values are embedded in the compiled `.hhk` and `.bin` files and are displayed by the launcher. For `.bin` files, keep all four fields present and non-empty because the current BIN metadata parser expects them in order. For `.hhk` files, you can omit fields you do not need.
 
 Similarly, open the `Makefile` and edit the first line (`APP_NAME:=app_template` by default), changing `app_template` to the filename you'd like your generated `.hhk` file to have.
 
@@ -39,6 +39,24 @@ Run `make` (remembering to set `SDK_DIR` inline if you didn't `export` it).
 A `.hhk` file with the name you specified in the `Makefile` will be generated, which you can then copy onto the root directory of the calculator's flash.
 
 Open the launcher and select your application to launch it. Have fun!
+
+**Important:** The launcher's display name comes from metadata embedded in
+the compiled program, not from the current filename. To inspect or change that
+metadata, use the [compiled metadata guide](metadata.md) and
+`tools/hhkmeta.py`.
+
+When renaming a compiled `.bin` or `.hhk`, use
+`tools/hhkrename.py` instead of only changing the filesystem name. The tool
+searches recognizable embedded ASCII strings for the old filename and updates
+matching references if found. If no reference is found, it simply renames the
+file. Example:
+
+```sh
+python3 tools/hhkrename.py PythonExtra-hh2.bin PythonExtra.bin
+```
+
+The utility does not change launcher display metadata. See
+[metadata and embedded references](metadata.md) for details.
 
 ## Newlib
 If you want to use C standard libraries such as math.h, string.h and others when developing for the fx-CP400, you must have a standard library implementation such as Newlib installed. Newlib also includes division and other arithmetic subroutines for our SuperH CPU, so that you do not have to always add them to your project manualy when you need them.

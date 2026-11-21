@@ -8,7 +8,7 @@ The UI Library exposes a direct-to-VRAM drawing API and a normalized event API. 
 
 ## Display lifecycle
 
-The SDK display must be initialized before a Framebuffer is attached. With the default Application lifecycle, create it inside onStart or onFileSelected after Application::Run() has called calcInit().
+The SDK display must be initialized before a Framebuffer is attached. With the default Application lifecycle, create it inside an application callback after Application::Run() has called calcInit(). This includes onStart, onFileSelected, onCustomMainMenu, onCustomFileSelector, and onCustomSettings.
 
 ~~~cpp
 static void Start(UI::Application &app) {
@@ -54,7 +54,7 @@ if (screen.Begin()) {
 }
 ~~~
 
-All drawing methods return false when the framebuffer is inactive or arguments are invalid. Pixel coordinates outside the display are rejected. Rectangles are clipped to the visible area. DrawLine() clips supported coordinates before rasterization and rejects endpoints outside -16383 to 16383.
+Drawing requires an active framebuffer. Methods return false for an inactive framebuffer or invalid dimensions/pointers; a valid rectangle that lies entirely outside the display is a successful no-op. Pixel writes outside the display are skipped. Rectangles are clipped to the visible area. DrawLine() accepts endpoints only in the range -16383 to 16383 on each axis; it rasterizes the bounded line and writes only pixels that lie inside the LCD. It does not allocate a temporary image or use a floating-point clipping step.
 
 Drawing modifies VRAM immediately. Present() calls LCD_Refresh(); it does not copy from a second buffer.
 
@@ -152,7 +152,7 @@ extern "C" void main() {
 
 In custom-screen mode, onStart is invoked again when the built-in file selector or built-in settings returns to the main application state. Use app.OpenFileSelector(), app.OpenSettings(), and app.Close() to request transitions.
 
-The existing file selector is unchanged. A fully custom file browser can combine Framebuffer, Input, UI::Directory, and UI::FileSystem.
+Each menu can independently select Native, Framebuffer, or Custom rendering. A custom file browser can combine Framebuffer, Input, UI::Directory, and UI::FileSystem; report a selected file with Application::SelectFile(). See application.md for the complete renderer API.
 
 ## Safety notes
 
@@ -160,7 +160,7 @@ The existing file selector is unchanged. A fully custom file browser can combine
 - Begin() validates the VRAM pointer and dynamic LCD dimensions. Each dimension must be positive and no greater than 16384; the total image is capped at 1,048,576 pixels.
 - SetPixel() rejects out-of-range coordinates.
 - Rectangle drawing clips to the visible display.
-- Line endpoints are range-checked before clipping and rasterization.
+- DrawLine() accepts endpoints only in the range -16383 to 16383 on each axis. It rasterizes the line between those endpoints and writes only pixels that fall inside the LCD bounds.
 - Drawing performs no dynamic allocation.
 - End() is idempotent; drawing after detaching is rejected.
 - Framebuffer does not manage the global LCD backup/restore lifecycle.

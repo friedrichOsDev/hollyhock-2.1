@@ -26,7 +26,7 @@ OBJCOPY := sh4-elf-objcopy
 
 AS_SOURCES := $(wildcard *.s)
 CC_SOURCES := $(wildcard *.c)
-CXX_SOURCES := $(wildcard *.cpp)
+CXX_SOURCES := $(wildcard *.cpp demo/*.cpp)
 OBJECTS := $(AS_SOURCES:.s=.o) $(CC_SOURCES:.c=.o) $(CXX_SOURCES:.cpp=.o)
 
 APP_ELF := $(APP_NAME).hhk
@@ -66,5 +66,8 @@ $(UI_DIR)/ui.o:
 %.o: %.cpp
 	$(CXX) -c $< -o $@ $(CXX_FLAGS)
 	@$(READELF) $@ -S | grep ".ctors" > /dev/null && echo "ERROR: Global constructors aren't supported." && rm $@ && exit 1 || exit 0
+
+# Rebuild both demo translation units when their shared declarations change.
+main.o demo/demo.o: demo/demo.hpp
 
 .PHONY: bin hhk all clean

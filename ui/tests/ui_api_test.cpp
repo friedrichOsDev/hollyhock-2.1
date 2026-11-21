@@ -196,10 +196,31 @@ int main() {
     UI::Config config;
     Check(config.showMainMenu && config.showStart && config.showQuit &&
           config.manageCalculatorLifecycle, "configuration defaults");
+    Check(config.mainMenuRenderer == UI::MenuRenderer::Native &&
+          config.fileSelectorRenderer == UI::MenuRenderer::Native &&
+          config.settingsRenderer == UI::MenuRenderer::Native,
+          "all menu renderers default to native");
+    Check(!config.onCustomMainMenu && !config.onCustomFileSelector &&
+          !config.onCustomSettings,
+          "custom renderer callbacks default to null");
     Check(!config.showFileSelector && !config.showSettings &&
           !config.onStart, "optional entries default off");
     Check(config.settingsFolder == 0,
           "persistent settings disabled by default");
+    config.mainMenuRenderer = UI::MenuRenderer::Framebuffer;
+    config.fileSelectorRenderer = UI::MenuRenderer::Custom;
+    config.settingsRenderer = UI::MenuRenderer::Native;
+    Check(config.mainMenuRenderer == UI::MenuRenderer::Framebuffer &&
+          config.fileSelectorRenderer == UI::MenuRenderer::Custom &&
+          config.settingsRenderer == UI::MenuRenderer::Native,
+          "renderer modes can be configured independently");
+    config.onCustomMainMenu = DummyAction;
+    config.onCustomFileSelector = DummyAction;
+    config.onCustomSettings = DummyAction;
+    Check(config.onCustomMainMenu == DummyAction &&
+          config.onCustomFileSelector == DummyAction &&
+          config.onCustomSettings == DummyAction,
+          "custom callbacks are configurable per menu");
 
     char path[256];
     Check(UI::FileSystem::NormalizePath(

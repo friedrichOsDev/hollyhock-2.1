@@ -122,3 +122,5 @@ I (@The6P4C) have burned out *hard* on this project, and won't be maintaining it
 5. [Writing programs without a PC](doc/user/exec.md)
 6. [Patching your firmware (from source)](doc/user/patching.md) (complicated, you do not need this, just scroll up to section [Install](#installation-simple))
 7. [Hollyhock UI Library](doc/ui-library/README.md) — build and API guide for the UI library.
+8. [Hollyhock Launcher](launcher/README.md) — UI-library-based launcher and independent build instructions.
+9. [Editing compiled metadata and embedded paths](doc/user/metadata.md) — update metadata or rename binaries with matching internal file paths.

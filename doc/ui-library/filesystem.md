@@ -40,6 +40,8 @@ NormalizePath() performs these checks:
 - Repeated separators are collapsed.
 - A path component equal to . is skipped.
 - A path component equal to .. is rejected to prevent parent-directory traversal.
+- Components containing control characters or FAT-reserved characters (:, *, ?, \", <, >, |) are rejected.
+- Components ending in a dot or space are rejected.
 - The output uses backslashes and begins with \fls0\.
 - The output buffer must be large enough. File and directory wrappers use a 256-byte path buffer.
 
@@ -181,7 +183,7 @@ config.filterCount = 2;
 
 Extensions may include or omit the leading dot. Matching is case-insensitive and based on the filename suffix. Directories are always shown. A null filter array or non-positive filter count means every file matches. The description is stored but is not currently displayed.
 
-The selector is not recursive. The user enters directories manually. The current implementation collects at most 64 entries in a directory and displays five entries per page.
+The selector is not recursive. The user enters directories manually. The built-in native and framebuffer selectors collect at most 64 entries in a directory. The native selector displays five entries per page; the framebuffer selector adapts its page size to the LCD height, up to five rows. A custom selector owns its own listing and page layout.
 
 ## Errors
 

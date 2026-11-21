@@ -19,6 +19,20 @@ public:
     void OpenFileSelector();
     void OpenSettings();
 
+    // Returns a selected file through onFileSelected and returns to the menu.
+    // The path is normalized before the callback is invoked.
+    int SelectFile(const char *path);
+
+    // Read or update the directory used by the built-in/custom file selector.
+    const char *CurrentDirectory() const;
+    int SetCurrentDirectory(const char *path);
+
+    // Custom renderers can reuse configured settings and file filters.
+    Setting *GetSettings();
+    int GetSettingCount() const;
+    int AdjustSetting(int index, int direction = 1);
+    bool FileMatchesFilter(const char *filename) const;
+
     bool IsRunning() const;
 
     // Returns zero on success or the latest persistence error code.
@@ -49,6 +63,14 @@ private:
     void RunMainMenu();
     void RunFileSelector();
     void RunSettings();
+
+    void RunNativeMainMenu();
+    void RunNativeFileSelector();
+    void RunNativeSettings();
+
+    bool RunFramebufferMainMenu();
+    bool RunFramebufferFileSelector();
+    bool RunFramebufferSettings();
 };
 
 } // namespace UI
