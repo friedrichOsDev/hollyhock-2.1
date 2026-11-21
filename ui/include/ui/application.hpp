@@ -27,6 +27,12 @@ public:
     const char *CurrentDirectory() const;
     int SetCurrentDirectory(const char *path);
 
+    // Custom renderers can reuse configured settings and file filters.
+    Setting *GetSettings();
+    int GetSettingCount() const;
+    int AdjustSetting(int index, int direction = 1);
+    bool FileMatchesFilter(const char *filename) const;
+
     bool IsRunning() const;
 
     // Returns zero on success or the latest persistence error code.
