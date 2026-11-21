@@ -53,7 +53,7 @@ int main() {
     Check(Equals(buffer,
           "UIST2;3;11:showPreviewB1;12:previewBytesI32;13:previewFormatE2;"),
           "serialized data contains stable keys and typed values");
-    Check(size == 62U,
+    Check(size == 64U,
           "serialized size includes the terminating null byte");
 
     // Reverse the setting order. Keyed loading must preserve the values.
