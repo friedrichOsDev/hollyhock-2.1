@@ -853,7 +853,8 @@ void Application::RunNativeMainMenu() {
     }
     if (m_config.showSettings &&
         (m_config.settingCount > 0 || m_config.onSettings ||
-         m_config.onCustomSettings)) {
+         (m_config.settingsRenderer == MenuRenderer::Custom &&
+          m_config.onCustomSettings))) {
         Button(elements, dialog, row++,
                m_config.settingsLabel ? m_config.settingsLabel : "Settings",
                E_SETTINGS);
@@ -1098,7 +1099,8 @@ bool Application::RunFramebufferMainMenu() {
     }
     if (m_config.showSettings &&
         (m_config.settingCount > 0 || m_config.onSettings ||
-         m_config.onCustomSettings)) {
+         (m_config.settingsRenderer == MenuRenderer::Custom &&
+          m_config.onCustomSettings))) {
         labels[count] = m_config.settingsLabel
             ? m_config.settingsLabel : "Settings";
         actions[count++] = ACTION_SETTINGS;
