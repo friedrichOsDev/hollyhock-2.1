@@ -207,6 +207,13 @@ int main() {
           !config.onStart, "optional entries default off");
     Check(config.settingsFolder == 0,
           "persistent settings disabled by default");
+    config.mainMenuRenderer = UI::MenuRenderer::Framebuffer;
+    config.fileSelectorRenderer = UI::MenuRenderer::Custom;
+    config.settingsRenderer = UI::MenuRenderer::Native;
+    Check(config.mainMenuRenderer == UI::MenuRenderer::Framebuffer &&
+          config.fileSelectorRenderer == UI::MenuRenderer::Custom &&
+          config.settingsRenderer == UI::MenuRenderer::Native,
+          "renderer modes can be configured independently");
 
     char path[256];
     Check(UI::FileSystem::NormalizePath(
