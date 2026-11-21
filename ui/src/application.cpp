@@ -7,6 +7,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <ui/application.hpp>
+#include "settings_codec.hpp"
 
 inline void *operator new(size_t, void *memory) noexcept {
     return memory;
@@ -18,8 +19,7 @@ namespace UI {
 namespace {
 enum { E_START = 1, E_FILES = 2, E_SETTINGS = 3, E_QUIT = 4,
        E_BACK = 5, E_PREV = 6, E_NEXT = 7, E_UP = 8, E_ROW = 20,
-       ROWS = 5, MAX_ENTRIES = 64, NAME_LEN = 128, PATH_LEN = 256,
-       MAX_PERSISTED_SETTINGS = 32, PERSISTENCE_BUFFER_SIZE = 512 };
+       ROWS = 5, MAX_ENTRIES = 64, NAME_LEN = 128, PATH_LEN = 256 };
 
 class EventDialog : public GUIDialog {
     int buttonIDs[12];
@@ -402,227 +402,7 @@ void Adjust(Setting &s, Application &app, int direction = 1) {
     }
 }
 
-// Versioned ASCII storage format: UIST1;<count>;<type><value>;...
-// Action entries are represented by A; because they have no persistent value.
-bool AddChar(char *out, int *position, char c) {
-    if (*position >= PERSISTENCE_BUFFER_SIZE - 1)
-        return false;
-    out[(*position)++] = c;
-    out[*position] = 0;
-    return true;
-}
-bool AddText(char *out, int *position, const char *text) {
-    while (*text) {
-        if (!AddChar(out, position, *text++))
-            return false;
-    }
-    return true;
-}
-bool AddUnsigned(char *out, int *position, unsigned int value) {
-    char digits[12];
-    int count = 0;
-    do {
-        digits[count++] = char('0' + value % 10U);
-        value /= 10U;
-    } while (value && count < (int)sizeof(digits));
-    while (count) {
-        if (!AddChar(out, position, digits[--count]))
-            return false;
-    }
-    return true;
-}
-bool AddSigned(char *out, int *position, int value) {
-    const bool negative = value < 0;
-    const unsigned int magnitude = negative
-        ? (unsigned int)(-(value + 1)) + 1U
-        : (unsigned int)value;
-    if (negative && !AddChar(out, position, '-'))
-        return false;
-    return AddUnsigned(out, position, magnitude);
-}
-
-bool ValidSettingDefinition(const Setting &setting) {
-    switch (setting.type) {
-    case SettingBoolean:
-        return setting.value != 0;
-    case SettingInteger:
-        return setting.value != 0 &&
-               setting.minimum <= setting.maximum &&
-               setting.step > 0;
-    case SettingEnum:
-        return setting.value != 0 &&
-               setting.options != 0 &&
-               setting.optionCount > 0;
-    case SettingAction:
-        return true;
-    default:
-        return false;
-    }
-}
-
-bool ValidSettingValue(const Setting &setting) {
-    if (!ValidSettingDefinition(setting))
-        return false;
-
-    if (setting.type == SettingInteger) {
-        const int value = *static_cast<const int *>(setting.value);
-        return value >= setting.minimum && value <= setting.maximum;
-    }
-    if (setting.type == SettingEnum) {
-        const int value = *static_cast<const int *>(setting.value);
-        return value >= 0 && value < setting.optionCount;
-    }
-    return true;
-}
-
-bool ValidSettingDefinitions(const Setting *settings, int count) {
-    if (!settings || count <= 0 || count > MAX_PERSISTED_SETTINGS)
-        return false;
-
-    for (int i = 0; i < count; ++i) {
-        if (!ValidSettingDefinition(settings[i]))
-            return false;
-    }
-    return true;
-}
-bool SerializeSettings(const Setting *settings, int count,
-                        char *out, uint32_t *size) {
-    if (!ValidSettingDefinitions(settings, count) || !out || !size)
-        return false;
-    int position = 0;
-    out[0] = 0;
-    if (!AddText(out, &position, "UIST1;") ||
-        !AddUnsigned(out, &position, (unsigned int)count) ||
-        !AddChar(out, &position, ';')) {
-        return false;
-    }
-    for (int i = 0; i < count; ++i) {
-        const Setting &setting = settings[i];
-        if (!ValidSettingValue(setting))
-            return false;
-        if (setting.type == SettingAction) {
-            if (!AddText(out, &position, "A;"))
-                return false;
-            continue;
-        }
-        if (!setting.value)
-            return false;
-        if (setting.type == SettingBoolean) {
-            if (!AddChar(out, &position, 'B') ||
-                !AddSigned(out, &position,
-                           *static_cast<bool *>(setting.value) ? 1 : 0) ||
-                !AddChar(out, &position, ';')) {
-                return false;
-            }
-        } else if (setting.type == SettingInteger) {
-            if (!AddChar(out, &position, 'I') ||
-                !AddSigned(out, &position,
-                           *static_cast<int *>(setting.value)) ||
-                !AddChar(out, &position, ';')) {
-                return false;
-            }
-        } else if (setting.type == SettingEnum) {
-            if (!AddChar(out, &position, 'E') ||
-                !AddSigned(out, &position,
-                           *static_cast<int *>(setting.value)) ||
-                !AddChar(out, &position, ';')) {
-                return false;
-            }
-        } else {
-            return false;
-        }
-    }
-    if (!AddChar(out, &position, 0))
-        return false;
-    *size = (uint32_t)position;
-    return true;
-}
-bool ParseSigned(const char **cursor, int *value) {
-    const char *p = *cursor;
-    bool negative = false;
-    if (*p == '-') {
-        negative = true;
-        ++p;
-    }
-    if (*p < '0' || *p > '9')
-        return false;
-    unsigned int number = 0;
-    const unsigned int limit = negative ? 2147483648U : 2147483647U;
-    while (*p >= '0' && *p <= '9') {
-        unsigned int digit = (unsigned int)(*p - '0');
-        if (number > (limit - digit) / 10U)
-            return false;
-        number = number * 10U + digit;
-        ++p;
-    }
-    if (*p != ';')
-        return false;
-    ++p;
-    if (negative) {
-        *value = number == 2147483648U
-            ? (-2147483647 - 1)
-            : -(int)number;
-    } else {
-        *value = (int)number;
-    }
-    *cursor = p;
-    return true;
-}
-bool ParseSettings(const char *data, const Setting *settings, int count) {
-    if (!data || !ValidSettingDefinitions(settings, count))
-        return false;
-    const char *p = data;
-    const char prefix[] = "UIST1;";
-    for (int i = 0; i < 6; ++i) {
-        if (*p++ != prefix[i])
-            return false;
-    }
-    int storedCount = 0;
-    if (!ParseSigned(&p, &storedCount) || storedCount != count)
-        return false;
-
-    int values[MAX_PERSISTED_SETTINGS];
-    for (int i = 0; i < count; ++i) {
-        const Setting &setting = settings[i];
-        char type = *p++;
-        if (type == 0)
-            return false;
-        if (setting.type == SettingAction) {
-            if (type != 'A' || *p++ != ';')
-                return false;
-            values[i] = 0;
-            continue;
-        }
-        int value = 0;
-        if (!ParseSigned(&p, &value))
-            return false;
-        if ((setting.type == SettingBoolean && (type != 'B' || (value != 0 && value != 1))) ||
-            (setting.type == SettingInteger &&
-             (type != 'I' || value < setting.minimum ||
-              value > setting.maximum)) ||
-            (setting.type == SettingEnum &&
-             (type != 'E' || value < 0 ||
-              value >= setting.optionCount)))
-            return false;
-        if (!setting.value)
-            return false;
-        values[i] = value;
-    }
-    if (*p != 0)
-        return false;
-    for (int i = 0; i < count; ++i) {
-        if (settings[i].type == SettingBoolean)
-            *static_cast<bool *>(settings[i].value) = values[i] != 0;
-        else if (settings[i].type == SettingInteger ||
-                 settings[i].type == SettingEnum) {
-            *static_cast<int *>(settings[i].value) = values[i];
-        }
-    }
-    return true;
-}
-} // namespace
-
-Application::Application(const Config &config)
+} // namespace\n\nApplication::Application(const Config &config)
     : m_config(),
       m_state(StateMainMenu),
       m_lifecycleStarted(false),
@@ -688,11 +468,11 @@ void Application::InitializeSettingsPersistence() {
 
     // Save() rounds data up to a four-byte boundary. A valid 511-byte
     // payload can therefore occupy 512 bytes in MCS, plus a local terminator.
-    char buffer[PERSISTENCE_BUFFER_SIZE + 1];
+    char buffer[Detail::PersistenceBufferSize + 1];
     uint8_t type = 0;
     uint32_t size = 0;
     result = m_settingsStore.Load("SETTINGS", &type, buffer,
-                                  PERSISTENCE_BUFFER_SIZE, &size);
+                                  Detail::PersistenceBufferSize, &size);
     if (result == MCS_NO_VARIABLE) {
         // Persist the application's defaults immediately. This makes the
         // SETTINGS variable visible on the first launch and ensures that
@@ -708,17 +488,24 @@ void Application::InitializeSettingsPersistence() {
         return;
     }
     if (type != VARTYPE_STR || size == 0 ||
-        size > PERSISTENCE_BUFFER_SIZE) {
+        size > Detail::PersistenceBufferSize) {
         m_persistenceResult = EUNFORMAT;
         return;
     }
     buffer[size] = 0;
-    if (!ParseSettings(buffer, m_config.settings, m_config.settingCount)) {
+    bool legacyFormat = false;
+    if (!Detail::ParseSettings(buffer, m_config.settings,
+                               m_config.settingCount, &legacyFormat)) {
         m_persistenceResult = EUNFORMAT;
         return;
     }
     m_persistenceReady = true;
     m_persistenceResult = 0;
+
+    // Upgrade a successfully loaded positional UIST1 payload immediately.
+    // The next launch will then restore values by stable setting key.
+    if (legacyFormat)
+        SaveSettingsToStorage();
 }
 void Application::LoadSettingsFromStorage() {
     InitializeSettingsPersistence();
@@ -728,19 +515,19 @@ void Application::SaveSettingsToStorage() {
         m_config.settingCount <= 0) {
         return;
     }
-    char buffer[PERSISTENCE_BUFFER_SIZE];
+    char buffer[Detail::PersistenceBufferSize];
     uint32_t size = 0;
-    if (!ValidSettingDefinitions(m_config.settings, m_config.settingCount)) {
+    if (!Detail::ValidSettingDefinitions(m_config.settings, m_config.settingCount)) {
         m_persistenceResult = EINVAL;
         return;
     }
     for (int i = 0; i < m_config.settingCount; ++i) {
-        if (!ValidSettingValue(m_config.settings[i])) {
+        if (!Detail::ValidSettingValue(m_config.settings[i])) {
             m_persistenceResult = EINVAL;
             return;
         }
     }
-    if (!SerializeSettings(m_config.settings, m_config.settingCount, buffer, &size)) {
+    if (!Detail::SerializeSettings(m_config.settings, m_config.settingCount, buffer, &size)) {
         m_persistenceResult = EOUTOFBOUND;
         return;
     }
@@ -865,7 +652,7 @@ int Application::AdjustSetting(int index, int direction) {
         return EINVAL;
 
     Setting &setting = m_config.settings[index];
-    if (!ValidSettingDefinition(setting) || direction == 0)
+    if (!Detail::ValidSettingDefinition(setting) || direction == 0)
         return EINVAL;
     if (setting.type == SettingAction && direction < 0)
         return 0;
