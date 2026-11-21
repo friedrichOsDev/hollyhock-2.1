@@ -55,9 +55,12 @@ def find_references(data: bytes, old_name: bytes):
     findings = []
     for start, end, slot_end in _c_string_ranges(data):
         string = data[start:end]
+        # Calculator filenames are case-insensitive; detect ASCII case variants.
+        folded = string.lower()
+        folded_name = old_name.lower()
         pos = 0
         while True:
-            index = string.find(old_name, pos)
+            index = folded.find(folded_name, pos)
             if index < 0:
                 break
             after = index + len(old_name)
