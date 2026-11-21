@@ -239,7 +239,19 @@ Directory is non-copyable and closes an open search handle in its destructor.
 
 ## File filters
 
-FileFilter stores an extension and optional description. FileFilterMatches(filename, filters, count) tests filename suffixes case-insensitively. A null filter array or a non-positive count allows all files. Directories remain visible regardless of filter.
+~~~cpp
+struct FileFilter {
+    const char *extension;
+    const char *description;
+    FileFilter(const char *ext = 0, const char *desc = 0);
+};
+
+bool FileFilterMatches(const char *filename,
+                       const FileFilter *filters,
+                       int filterCount);
+~~~
+
+FileFilter stores an extension and optional description. FileFilterMatches() tests filename suffixes case-insensitively. Extensions may include or omit the leading dot. A null filter array or a non-positive count allows all non-empty file names. Directories remain visible regardless of the configured file filters.
 
 ## SDK boundary
 
