@@ -212,7 +212,22 @@ Setting descriptions are stored. The Framebuffer settings renderer shows the sel
 
 ### Persistent settings
 
-Set config.settingsFolder to a unique 1-8 character MCS folder name. The library loads saved settings before the first application screen and saves after changes and normal exit. The serializer supports at most 32 settings and a payload smaller than 512 bytes.
+Set config.settingsFolder to a unique 1-8 character MCS folder name. The library loads saved settings before the first application screen and saves after changes and normal exit. The serializer supports at most 32 settings, a payload smaller than 512 bytes, and keys up to 63 printable ASCII characters.
+
+Use an explicit stable ID as the first argument to a setting factory when the value should survive a display-name change or reordering of the settings array:
+
+~~~cpp
+UI::Setting::Boolean(
+    "display.showGrid", "Show grid", &showGrid);
+UI::Setting::Integer(
+    "editor.zoom", "Zoom", &zoom, 50, 200, 10);
+~~~
+
+IDs must be unique within one settings array. If no ID is supplied, the setting name is used as the storage key for source compatibility. This fallback means renaming the setting also changes its key; prefer explicit IDs for persistent settings. Keys are case-sensitive and must contain only printable ASCII.
+
+The current format is UIST2 and stores each value together with its setting key. Reordering settings no longer moves values between settings. New keys keep their configured defaults, and stored keys that no longer exist are ignored. A type or range mismatch leaves the current setting at its default. Duplicate or invalid keys prevent serialization.
+
+Existing UIST1 data is still accepted. Because UIST1 did not contain setting keys, its first migration necessarily matches values by the current array order. After a successful UIST1 load, the library immediately writes UIST2; later reordering is then safe.
 
 Use UI::PersistentStore for application-owned persistent data beyond the built-in settings array.
 
