@@ -721,7 +721,7 @@ def main() -> int:
     try:
         cpv = CPVFile(path)
         print(
-            f"CPV v1.{cpv.version_minor}: {cpv.width}x{cpv.height}, 
+            f"CPV v1.{cpv.version_minor}: {cpv.width}x{cpv.height}, "
             f"{cpv.fps_num}/{cpv.fps_den} FPS, "
             f"{len(cpv.frames)} stored frames, "
             f"{cpv.total_duration_ms / 1000:.3f} s, "
