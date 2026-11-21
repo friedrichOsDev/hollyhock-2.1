@@ -156,6 +156,12 @@ The path is valid for the duration of the callback. A custom file browser can co
 | ReturnToMenu() | Changes the current state to the main application state. |
 | OpenFileSelector() | Opens the built-in file selector when enabled. |
 | OpenSettings() | Opens the built-in settings screen when enabled. |
+| SelectFile(path) | Normalizes a selected path, invokes onFileSelected, and returns to the main menu unless the callback changes state. |
+| CurrentDirectory() | Returns the current file-selector directory. |
+| SetCurrentDirectory(path) | Normalizes and stores the current file-selector directory. |
+| GetSettings(), GetSettingCount() | Access the configured settings array and count. |
+| AdjustSetting(index, direction) | Applies a setting change and persists it when storage is open. |
+| FileMatchesFilter(filename) | Tests a regular file name against the configured filters. |
 | IsRunning() const | Returns false after exit is selected. |
 | SettingsPersistenceResult() const | Returns 0 on success or latest MCS persistence error. |
 
@@ -168,7 +174,7 @@ UI::Setting *settings = app.GetSettings();
 int count = app.GetSettingCount();
 ~~~
 
-The Setting objects contain the application-owned value pointers, option arrays, descriptions, and action callbacks. Use `app.AdjustSetting(index, direction)` to apply the library's Boolean/Integer/Enumeration/Action behavior and save persistent settings immediately. A negative direction steps backward; a positive direction steps forward. Direct value changes are also saved when the custom settings callback returns.
+The Setting objects contain the application-owned value pointers, option arrays, descriptions, and action callbacks. Use `app.AdjustSetting(index, direction)` to apply the library's Boolean/Integer/Enumeration/Action behavior and save persistent settings immediately. A negative direction steps backward; a positive direction steps forward and invokes Action entries. A negative direction does not invoke an Action entry. Direct value changes are also saved when the custom settings callback returns.
 
 ## Built-in settings
 
@@ -179,7 +185,7 @@ The Setting objects contain the application-owned value pointers, option arrays,
 | Enumeration | Setting::Enumeration() | int * | Advances and wraps |
 | Action | Setting::Action() | none | Calls callback |
 
-Setting descriptions are stored but not currently displayed.
+Setting descriptions are stored. The Framebuffer settings renderer shows the selected setting's description; the Native SDK settings dialog does not currently display it.
 
 ### Persistent settings
 
