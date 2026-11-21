@@ -322,6 +322,38 @@ def emit_repeat(out: bytearray, value: int, length: int, stats: PacketStats) -> 
         remaining -= count
 
 
+def emit_repeat_batch(out: bytearray, values, run_starts, run_lengths,
+                      stats: PacketStats) -> None:
+    """Emit many repeat packets in one NumPy operation, preserving run order."""
+    lengths = np.asarray(run_lengths, dtype=np.int64)
+    starts = np.asarray(run_starts, dtype=np.int64)
+    repeated_values = values[starts]
+
+    # Oversized runs are rare at <=528x320. Split these few runs explicitly.
+    if np.any(lengths > MAX_RUN_LENGTH):
+        for value, length in zip(repeated_values, lengths):
+            emit_repeat(out, int(value), int(length), stats)
+        return
+
+    short = lengths <= 32
+    packets = np.empty((lengths.size, 3), dtype=np.uint8)
+    packets[:, 0] = np.where(
+        short,
+        0x40 | (lengths - 1),
+        0x60 | ((lengths >> 8) & 0x1F),
+    )
+    packets[:, 1] = np.where(short, repeated_values, lengths & 0xFF)
+    packets[:, 2] = np.where(short, 0, repeated_values)
+    keep = np.ones((lengths.size, 3), dtype=np.bool_)
+    keep[short, 2] = False
+
+    encoded = packets[keep].tobytes()
+    out.extend(encoded)
+    count = int(lengths.size)
+    stats.counts[OP_INDEX_REPEAT] += count
+    stats.sizes[OP_INDEX_REPEAT] += len(encoded)
+
+
 def emit_skip(out: bytearray, length: int, stats: PacketStats) -> None:
     remaining = length
     while remaining:
@@ -357,7 +389,9 @@ def encode_palette_segment(values, out: bytearray, stats: PacketStats) -> None:
     boundaries[-1] = length
 
     run_lengths = np.diff(boundaries)
-    repeated = run_lengths >= 2
+    # Short runs save little once packet headers are counted; keep them in
+    # literals to reduce packet count and encoder work.
+    repeated = run_lengths >= 4
 
     if not np.any(repeated):
         emit_literal(out, values, stats)
@@ -389,22 +423,31 @@ def encode_palette_segment(values, out: bytearray, stats: PacketStats) -> None:
             run_plan_cost += literal_cost(pixel_length)
 
     all_literal_cost = literal_cost(length)
-    # Avoid generating thousands of tiny repeat packets for a negligible gain.
+    group_count = group_boundaries.size - 1
+    # On highly fragmented patterns, a literal stream is faster to encode and
+    # decode than thousands of tiny alternating packet groups.
+    if group_count > 256:
+        emit_literal(out, values, stats)
+        return
+
     saving_threshold = max(4, all_literal_cost // 100)
     if run_plan_cost + saving_threshold >= all_literal_cost:
         emit_literal(out, values, stats)
         return
 
-    for group in range(group_boundaries.size - 1):
+    for group in range(group_count):
         first_run = int(group_boundaries[group])
         after_run = int(group_boundaries[group + 1])
         pixel_start = int(boundaries[first_run])
         pixel_end = int(boundaries[after_run])
         if repeated[first_run]:
-            for run in range(first_run, after_run):
-                run_start = int(boundaries[run])
-                run_length = int(run_lengths[run])
-                emit_repeat(out, int(values[run_start]), run_length, stats)
+            emit_repeat_batch(
+                out,
+                values,
+                boundaries[first_run:after_run],
+                run_lengths[first_run:after_run],
+                stats,
+            )
         else:
             emit_literal(out, values[pixel_start:pixel_end], stats)
 
