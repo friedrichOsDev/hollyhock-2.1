@@ -46,7 +46,9 @@ Keep all strings and arrays referenced by Config alive for the entire call to Ru
 
 ## Built-in main menu
 
-The built-in menu is enabled by default. It displays the configured Start, Files, Settings, and Quit entries. Start requires showStart and a non-null onStart callback.
+The main menu is enabled by default. Its Start entry is shown only when showStart is true and onStart is non-null. Files is shown when showFileSelector is true. Settings is shown when showSettings is true and at least one of the following applies: settingCount is positive, onSettings is non-null, or the Settings renderer is Custom and onCustomSettings is non-null. Quit is shown when showQuit is true. If no entries are available, the library displays a fallback Quit entry.
+
+The library-provided Native and Framebuffer main menus invoke the same application callbacks and request the same state transitions; they differ only in presentation and input handling.
 
 ## Custom main screen
 
@@ -192,16 +194,18 @@ UI::Setting *settings = app.GetSettings();
 int count = app.GetSettingCount();
 ~~~
 
-The Setting objects contain the application-owned value pointers, option arrays, descriptions, and action callbacks. Use `app.AdjustSetting(index, direction)` to apply the library's Boolean/Integer/Enumeration/Action behavior and save persistent settings immediately. A negative direction steps backward; a positive direction steps forward and invokes Action entries. A negative direction does not invoke an Action entry. Direct value changes are also saved when the custom settings callback returns.
+The Setting objects contain the application-owned value pointers, option arrays, descriptions, and action callbacks. Use `app.AdjustSetting(index, direction)` to apply the library's Boolean/Integer/Enumeration/Action behavior. Boolean values toggle. Integer values move by their configured step and wrap at the configured minimum or maximum. Enumeration values move through their option indices and wrap at either end. A positive direction invokes an Action entry; a negative direction does not invoke it.
+
+When the MCS store is open, AdjustSetting() saves after applying a change. Direct changes made through the value pointers are saved when the custom settings callback returns.
 
 ## Built-in settings
 
 | Type | Factory | Value pointer | Behavior |
 | --- | --- | --- | --- |
-| Boolean | Setting::Boolean() | bool * | Toggles true/false |
-| Integer | Setting::Integer() | int * | Adds step and wraps |
-| Enumeration | Setting::Enumeration() | int * | Advances and wraps |
-| Action | Setting::Action() | none | Calls callback |
+| Boolean | Setting::Boolean() | bool * | Toggles true/false for either direction |
+| Integer | Setting::Integer() | int * | Adds or subtracts step and wraps at the configured range |
+| Enumeration | Setting::Enumeration() | int * | Moves forward/backward through options and wraps |
+| Action | Setting::Action() | none | Calls callback for a positive adjustment |
 
 Setting descriptions are stored. The Framebuffer settings renderer shows the selected setting's description; the Native SDK settings dialog does not currently display it.
 
@@ -225,7 +229,7 @@ config.filterCount = 2;
 config.onFileSelected = FileSelected;
 ~~~
 
-Extensions can include or omit the leading dot. Matching is case-insensitive. Directories are always shown. The selector starts at fls0, displays five entries per page, collects up to 64 entries in a directory, and sorts directories before files.
+Extensions can include or omit the leading dot. Matching is case-insensitive. Directories are always shown. The built-in native and framebuffer selectors start at fls0, collect up to 64 entries in a directory, and sort directories before files. The Native selector displays five entries per page. The Framebuffer selector adapts its visible row count to the LCD height, up to five rows per page. A Custom selector owns its own listing, filtering, sorting, and pagination; it can use CurrentDirectory(), SetCurrentDirectory(), and FileMatchesFilter() to share the application's configured path and filters.
 
 The file-system wrapper is read-only. It does not create, write, delete, rename, move, or create directories.
 
