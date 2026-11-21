@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate, decode, and preview CPV v1.0 global-palette video files."""
+"""Validate, decode, and preview CPV v1.1 global-palette video files."""
 
 from __future__ import annotations
 
@@ -17,10 +17,15 @@ try:
 except ImportError:
     np = None
 
+try:
+    import lz4.block as lz4_block
+except ImportError:
+    lz4_block = None
+
 
 MAGIC = b"CPV\0"
 VERSION_MAJOR = 1
-VERSION_MINOR = 0
+VERSION_MINOR = 1
 
 HEADER = struct.Struct("<4sBBHIHHHHIHHIIII20s")
 FRAME_HEADER = struct.Struct("<4sBBHIII")
@@ -31,6 +36,7 @@ MAX_WIDTH = 528
 MAX_HEIGHT = 320
 MAX_FPS = 30
 MAX_RUN_LENGTH = 8191
+FRAME_FLAG_LZ4 = 0x01
 
 FRAME_I = 0
 FRAME_P = 1
@@ -39,8 +45,9 @@ OP_INDEX_LITERAL = 0
 OP_INDEX_REPEAT = 1
 OP_SKIP = 2
 OP_RAW565 = 3
+OP_DELTA_MASK = 4
 
-OP_NAMES = ("INDEX_LITERAL", "INDEX_REPEAT", "SKIP", "RAW565")
+OP_NAMES = ("INDEX_LITERAL", "INDEX_REPEAT", "SKIP", "RAW565", "DELTA_MASK")
 
 
 class CPVError(Exception):
@@ -52,6 +59,7 @@ class FrameRecord:
     number: int
     frame_type: int
     duration_ms: int
+    flags: int
     payload_size: int
     file_offset: int
     payload_offset: int
@@ -78,6 +86,8 @@ class CPVFile:
         self.height = 0
         self.fps_num = 0
         self.fps_den = 0
+        self.version_minor = 0
+        self.index_bits = 8
         self.frame_count = 0
         self.palette_count = 0
         self.total_duration_ms = 0
@@ -122,10 +132,12 @@ class CPVFile:
 
         if magic != MAGIC:
             raise CPVError("invalid magic; expected CPV\\0")
-        if (major, minor) != (VERSION_MAJOR, VERSION_MINOR):
+        if major != VERSION_MAJOR or minor not in (0, VERSION_MINOR):
             raise CPVError(
-                f"unsupported CPV version {major}.{minor}; this player supports 1.0"
+                f"unsupported CPV version {major}.{minor}; this player supports 1.0 and 1.1"
             )
+        self.version_minor = minor
+        self.index_bits = 8 if minor == 0 else max(1, (self.palette_count - 1).bit_length())
         if header_size != HEADER.size:
             raise CPVError(f"invalid file header size {header_size}; expected {HEADER.size}")
         if flags != 0 or reserved0 != 0 or reserved1 != bytes(20):
@@ -200,8 +212,10 @@ class CPVFile:
                 raise CPVError(f"frame {number} has invalid magic; expected FRM1")
             if frame_type not in (FRAME_I, FRAME_P):
                 raise CPVError(f"frame {number} has unknown type {frame_type}")
-            if frame_flags != 0:
-                raise CPVError(f"frame {number} has non-zero reserved flags")
+            if frame_flags & ~FRAME_FLAG_LZ4:
+                raise CPVError(f"frame {number} has unknown flag bits 0x{frame_flags:02x}")
+            if minor == 0 and frame_flags != 0:
+                raise CPVError(f"CPV 1.0 frame {number} must have zero flags")
             if frame_header_size != FRAME_HEADER.size:
                 raise CPVError(f"frame {number} has invalid header size")
             if frame_number != number:
@@ -225,6 +239,7 @@ class CPVFile:
                 number=number,
                 frame_type=frame_type,
                 duration_ms=duration_ms,
+                flags=frame_flags,
                 payload_size=payload_size,
                 file_offset=position,
                 payload_offset=payload_offset,
@@ -266,17 +281,68 @@ class CPVFile:
         self.frame_starts = [record.start_ms for record in self.frames]
 
     def _read_payload(self, record: FrameRecord) -> bytes:
+        pixel_count = self.width * self.height
+        max_decoded_size = pixel_count * 3
+        if record.flags & FRAME_FLAG_LZ4:
+            if self.version_minor < 1:
+                raise CPVError(f"frame {record.number}: LZ4 is not valid in CPV 1.0")
+            if lz4_block is None:
+                raise CPVError(
+                    "this video contains LZ4-compressed frames; install python-lz4 "
+                    "(Arch/CachyOS: sudo pacman -S python-lz4)"
+                )
+            if record.payload_size < 5:
+                raise CPVError(f"frame {record.number}: truncated LZ4 payload")
+            stored = self._read_exact_at(
+                record.payload_offset, record.payload_size, f"frame {record.number} payload"
+            )
+            decoded_size = struct.unpack_from("<I", stored, 0)[0]
+            if not (1 <= decoded_size <= max_decoded_size):
+                raise CPVError(
+                    f"frame {record.number}: invalid LZ4 decoded size {decoded_size}"
+                )
+            if record.payload_size - 4 >= decoded_size:
+                raise CPVError(f"frame {record.number}: LZ4 block is not smaller than raw payload")
+            try:
+                decoded = lz4_block.decompress(stored[4:], uncompressed_size=decoded_size)
+            except Exception as exc:
+                raise CPVError(f"frame {record.number}: LZ4 decompression failed: {exc}") from exc
+            if len(decoded) != decoded_size:
+                raise CPVError(
+                    f"frame {record.number}: LZ4 decoded {len(decoded)} bytes, expected {decoded_size}"
+                )
+            return decoded
+
+        if record.payload_size > max_decoded_size:
+            raise CPVError(
+                f"frame {record.number}: raw packet payload exceeds the {max_decoded_size}-byte safety limit"
+            )
         return self._read_exact_at(
             record.payload_offset, record.payload_size, f"frame {record.number} payload"
         )
 
     @staticmethod
-    def _read_run_length(payload: memoryview, position: int, frame_number: int):
+    def _read_run_length(payload: memoryview, position: int, frame_number: int,
+                         version_minor: int):
         if position >= len(payload):
             raise CPVError(f"frame {frame_number}: truncated packet header")
         first = payload[position]
         position += 1
         opcode = first >> 6
+
+        # 0xA0 0x00 is the v1.1 extended SKIP/DELTA_MASK sentinel.
+        if opcode == OP_SKIP and first == 0xA0 and position < len(payload) and payload[position] == 0:
+            if version_minor < 1:
+                raise CPVError(f"frame {frame_number}: DELTA_MASK is not valid in CPV 1.0")
+            position += 1
+            if position + 2 > len(payload):
+                raise CPVError(f"frame {frame_number}: truncated DELTA_MASK span length")
+            run_length = struct.unpack_from("<H", payload, position)[0]
+            position += 2
+            if not (1 <= run_length <= 65535):
+                raise CPVError(f"frame {frame_number}: invalid DELTA_MASK span length {run_length}")
+            return OP_DELTA_MASK, run_length, position
+
         if (first & 0x20) == 0:
             run_length = (first & 0x1F) + 1
         else:
@@ -288,6 +354,31 @@ class CPVFile:
             if not (33 <= run_length <= MAX_RUN_LENGTH):
                 raise CPVError(f"frame {frame_number}: invalid long run length {run_length}")
         return opcode, run_length, position
+
+    def _read_palette_indices(self, payload: memoryview, position: int,
+                              count: int, frame_number: int):
+        bit_width = self.index_bits
+        byte_count = (count * bit_width + 7) // 8
+        end = position + byte_count
+        if end > len(payload):
+            raise CPVError(f"frame {frame_number}: truncated packed palette indices")
+        packed = np.frombuffer(payload, dtype=np.uint8, count=byte_count, offset=position)
+        if bit_width == 8:
+            indices = packed.copy()
+        elif count == 0:
+            indices = np.empty(0, dtype=np.uint8)
+        else:
+            unpacked = np.unpackbits(packed, bitorder="little")
+            useful_bits = count * bit_width
+            if np.any(unpacked[useful_bits:]):
+                raise CPVError(f"frame {frame_number}: non-zero INDEX_LITERAL padding bits")
+            weights = (1 << np.arange(bit_width, dtype=np.uint16))
+            indices = (
+                unpacked[:useful_bits].reshape(count, bit_width).astype(np.uint16) * weights
+            ).sum(axis=1).astype(np.uint8)
+        if indices.size and int(indices.max()) >= self.palette_count:
+            raise CPVError(f"frame {frame_number}: invalid palette index")
+        return indices, end
 
     def decode_frame(self, frame_number: int, framebuffer):
         if not (0 <= frame_number < len(self.frames)):
@@ -307,23 +398,17 @@ class CPVFile:
 
         while payload_position < len(payload):
             opcode, run_length, payload_position = self._read_run_length(
-                payload, payload_position, frame_number
+                payload, payload_position, frame_number, self.version_minor
             )
             if run_length > pixel_count - pixel_position:
                 raise CPVError(f"frame {frame_number}: packet exceeds frame pixel count")
             end = pixel_position + run_length
 
             if opcode == OP_INDEX_LITERAL:
-                data_end = payload_position + run_length
-                if data_end > len(payload):
-                    raise CPVError(f"frame {frame_number}: truncated INDEX_LITERAL data")
-                indices = np.frombuffer(
-                    payload_bytes, dtype=np.uint8, count=run_length, offset=payload_position
+                indices, payload_position = self._read_palette_indices(
+                    payload, payload_position, run_length, frame_number
                 )
-                if indices.size and int(indices.max()) >= self.palette_count:
-                    raise CPVError(f"frame {frame_number}: INDEX_LITERAL has invalid palette index")
                 framebuffer[pixel_position:end] = self.palette[indices]
-                payload_position = data_end
 
             elif opcode == OP_INDEX_REPEAT:
                 if payload_position >= len(payload):
@@ -331,12 +416,40 @@ class CPVFile:
                 palette_index = int(payload[payload_position])
                 payload_position += 1
                 if palette_index >= self.palette_count:
-                    raise CPVError(f"frame {frame_number}: INDEX_REPEAT has invalid palette index")
+                    raise CPVError(f"frame {frame_number}: invalid INDEX_REPEAT palette index")
                 framebuffer[pixel_position:end] = self.palette[palette_index]
 
             elif opcode == OP_SKIP:
                 if record.frame_type != FRAME_P:
                     raise CPVError(f"frame {frame_number}: SKIP is invalid in an I-frame")
+
+            elif opcode == OP_DELTA_MASK:
+                if record.frame_type != FRAME_P:
+                    raise CPVError(f"frame {frame_number}: DELTA_MASK is invalid in an I-frame")
+                mask_size = (run_length + 7) // 8
+                mask_end = payload_position + mask_size
+                if mask_end > len(payload):
+                    raise CPVError(f"frame {frame_number}: truncated DELTA_MASK bitmap")
+                mask_bytes = np.frombuffer(
+                    payload, dtype=np.uint8, count=mask_size, offset=payload_position
+                )
+                mask_bits = np.unpackbits(mask_bytes, bitorder="little")[:run_length]
+                if run_length & 7:
+                    used_bits = run_length & 7
+                    final_byte = int(mask_bytes[-1])
+                    if final_byte >> used_bits:
+                        raise CPVError(f"frame {frame_number}: non-zero DELTA_MASK padding bits")
+                changed_positions = np.flatnonzero(mask_bits)
+                changed_count = int(changed_positions.size)
+                if changed_count == 0 or changed_count == run_length:
+                    raise CPVError(
+                        f"frame {frame_number}: DELTA_MASK must contain both changed and unchanged pixels"
+                    )
+                indices, payload_position = self._read_palette_indices(
+                    payload, mask_end, changed_count, frame_number
+                )
+                framebuffer[pixel_position + changed_positions] = self.palette[indices]
+                # _read_palette_indices starts at mask_end and returns the byte after the index stream.
 
             elif opcode == OP_RAW565:
                 byte_count = run_length * 2
@@ -344,7 +457,7 @@ class CPVFile:
                 if data_end > len(payload):
                     raise CPVError(f"frame {frame_number}: truncated RAW565 data")
                 raw_values = np.frombuffer(
-                    payload_bytes, dtype="<u2", count=run_length, offset=payload_position
+                    payload, dtype="<u2", count=run_length, offset=payload_position
                 )
                 framebuffer[pixel_position:end] = raw_values
                 payload_position = data_end
@@ -592,7 +705,7 @@ class CPVPlayer:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Play and inspect CPV v1.0 video files.")
+    parser = argparse.ArgumentParser(description="Play and inspect CPV v1.0/v1.1 video files.")
     parser.add_argument("cpv_file", help="input .cpv file")
     return parser
 
@@ -608,7 +721,7 @@ def main() -> int:
     try:
         cpv = CPVFile(path)
         print(
-            f"CPV v1.0: {cpv.width}x{cpv.height}, "
+            f"CPV v1.{cpv.version_minor}: {cpv.width}x{cpv.height}, 
             f"{cpv.fps_num}/{cpv.fps_den} FPS, "
             f"{len(cpv.frames)} stored frames, "
             f"{cpv.total_duration_ms / 1000:.3f} s, "
