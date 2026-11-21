@@ -58,6 +58,10 @@ private:
     void RunFileSelector();
     void RunSettings();
 
+    void RunNativeMainMenu();
+    void RunNativeFileSelector();
+    void RunNativeSettings();
+
     bool RunFramebufferMainMenu();
     bool RunFramebufferFileSelector();
     bool RunFramebufferSettings();
