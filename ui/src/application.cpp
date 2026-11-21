@@ -1389,7 +1389,7 @@ bool Application::RunFramebufferFileSelector() {
 
         if (footerAction == 0) {
             if (page > 0)
-                selected = (page - 1) * ROWS;
+                selected = (page - 1) * rowsPerPage;
         } else if (footerAction == 1) {
             if ((page + 1) * rowsPerPage < count)
                 selected = (page + 1) * rowsPerPage;
