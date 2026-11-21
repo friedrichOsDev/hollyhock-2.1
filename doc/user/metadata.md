@@ -1,107 +1,98 @@
-# Editing compiled program metadata
+# Editing compiled program metadata and renaming binaries
 
-The Hollyhock Launcher can display metadata embedded in the compiled program.
-This is separate from the filename stored inside some applications. There are
-therefore two different things that may need changing:
+Compiled programs may contain different kinds of names:
 
 - **Launcher metadata** (display name, description, author, version): use
-  \`tools/hhkmeta.py\`.
-- **An application's hard-coded calculator file path** (for example
-  \`\\fls0\\PythonExtra-hh2.bin\`): use \`tools/hhkrename.py\`.
+  `tools/hhkmeta.py`.
+- **Embedded references to the physical filename**: use
+  `tools/hhkrename.py`. This searches recognizable strings and updates matching
+  references when found; otherwise it simply renames the file.
 
-Renaming a file in the computer's file manager does not update either value
-inside the binary.
+Renaming in a file manager does not change launcher metadata or embedded strings.
 
 ## Inspect metadata
 
 From the repository root:
 
-\`\`\`sh
+```sh
 python3 tools/hhkmeta.py show path/to/application.bin
 python3 tools/hhkmeta.py show path/to/application.hhk
-\`\`\`
-
-The output shows the compiled name, description, author and version, along
-with the maximum number of characters currently available in each field.
+```
 
 ## Change launcher metadata
 
-Use \`set\` to edit one or more metadata attributes. By default, the tool
-creates a new file named \`<original-name>.patched.<extension>\`:
+Use `set` to edit one or more attributes. By default, the tool creates
+`<original-name>.patched.<extension>`:
 
-\`\`\`sh
-python3 tools/hhkmeta.py set path/to/application.bin \\
-    --name "New Display Name" \\
-    --author "New Author"
-\`\`\`
+```sh
+python3 tools/hhkmeta.py set application.bin --name "New Display Name" --author "New Author"
+```
 
-Choose a specific output path with \`-o\`:
+Choose a specific output path with `-o`:
 
-\`\`\`sh
-python3 tools/hhkmeta.py set path/to/application.hhk \\
-    --name "My Application" \\
-    --description "A short description" \\
-    -o path/to/MyApplication.hhk
-\`\`\`
+```sh
+python3 tools/hhkmeta.py set application.hhk \
+    --name "My Application" --description "A short description" \
+    -o MyApplication.hhk
+```
 
-To edit the input file directly, use \`--in-place\`. The original is saved as
-\`FILE.bak\` first:
+To edit the input directly, use `--in-place`. A `FILE.bak` backup is created
+first:
 
-\`\`\`sh
-python3 tools/hhkmeta.py set path/to/application.bin \\
-    --name "New Display Name" --in-place
-\`\`\`
+```sh
+python3 tools/hhkmeta.py set application.bin --name "New Display Name" --in-place
+```
 
-## Rename a file and update its embedded calculator path
+## Rename a compiled file and patch references
 
-Some applications contain an absolute calculator path in their program image,
-such as \`\\fls0\\PythonExtra-hh2.bin\`. The application opens that exact path at
-runtime. Renaming the file on the computer or calculator alone leaves the
-embedded string unchanged and can make the application fail to start.
+Some programs embed their own filename or a path to it, such as
+`\\fls0\\PythonExtra-hh2.bin`. When a program expects that exact path,
+changing only the filesystem filename can break it.
 
-Use the separate \`tools/hhkrename.py\` utility for this case:
+Use:
 
-\`\`\`sh
+```sh
 python3 tools/hhkrename.py PythonExtra-hh2.bin PythonExtra.bin
-\`\`\`
+```
 
-This performs two linked operations:
+The rename utility:
 
-1. Replaces the embedded path with \`\\fls0\\PythonExtra.bin\` (or preserves
-   \`\\drv0\\\` when that is the path found in the program).
-2. Writes the file under the new name and removes the old source file only
-   after the updated destination has been written successfully.
+1. Scans the binary for printable ASCII, NUL-terminated strings containing the
+   source basename as a complete token (standalone or after/before a slash or
+   backslash, such as in a path).
+2. Updates every matching occurrence to the destination basename.
+3. Uses existing zero padding after the string as extra capacity. If the
+   replacement does not fit, it aborts without changing either file.
+4. Writes the destination first and removes the source only after the new file
+   has been written successfully. It refuses to overwrite an existing target.
 
-Run it from the folder containing the file, or pass full paths to both
-arguments. Use \`--dry-run\` to inspect the embedded path changes without
-writing anything:
+If no recognizable references are found, it performs an ordinary file rename
+and leaves the binary contents unchanged. Use `--dry-run` to inspect the
+analysis without writing:
 
-\`\`\`sh
+```sh
 python3 tools/hhkrename.py PythonExtra-hh2.bin PythonExtra.bin --dry-run
-\`\`\`
+```
 
-**This utility does not change the launcher's display metadata.** Use
-\`hhkmeta.py\` separately only when the displayed name or other metadata also
-needs changing.
+This tool does not change launcher metadata. The display name remains whatever
+was compiled into the metadata; edit it separately with `hhkmeta.py` if desired.
 
-## Safety and format limits
+## Limits and safety
 
-- \`hhkrename.py\` only changes a full embedded \`\\fls0\\...\` or \`\\drv0\\...\`
-  path whose basename exactly matches the source filename. It updates every
-  matching occurrence and refuses to guess when no match is found.
-- It uses only the NUL bytes already following the embedded string as
-  additional path capacity. If the new path is too long, it stops before
-  changing the source file.
-- It never overwrites an existing destination. If the original cannot be
-  removed after the new file is written, both copies are kept and a warning is
+- The scanner recognizes printable ASCII strings terminated by NUL. It does
+  not currently decode UTF-16, compressed/encrypted data, or runtime-built
+  strings, and it cannot prove that a program has no other filename dependency.
+- A match is changed only when it appears as a complete filename token,
+  avoiding incidental matches inside longer words.
+- Replacement strings must be ASCII basenames. Directory components are not
+  accepted as the destination name.
+- Existing NUL padding is the only spare storage used. The utility never moves
+  code or expands the string's allocated area.
+- Existing destination files are not overwritten. If writing succeeds but the
+  source cannot be removed, both files are left in place and a warning is
   printed.
-- \`hhkmeta.py\` edits only the launcher's metadata fields. It does not rename
-  files or change embedded file paths.
-- Metadata values supported by the launcher are printable ASCII
-  (characters \`0x20\` through \`0x7E\`).
-- For \`.bin\`, all four metadata fields must be present and non-empty because
-  the current launcher parser skips empty fields. For \`.hhk\`, an attribute
-  can only be changed if its \`.hollyhock_*\` section exists.
+- `hhkmeta.py` edits only launcher metadata. Values must be printable ASCII
+  (0x20-0x7E). For BIN files, all four fields must be present and non-empty.
+  For HHK files, a field can only be edited if its `.hollyhock_*` section exists.
 
-Keep a backup of the original application until the renamed program has been
-tested on the calculator.
+Keep a backup until the renamed program has been tested on the calculator.
