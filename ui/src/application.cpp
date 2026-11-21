@@ -327,7 +327,14 @@ void Application::InitializeSettingsPersistence() {
     uint8_t type = 0; uint32_t size = 0;
     result = m_settingsStore.Load("SETTINGS", &type, buffer, sizeof(buffer) - 1, &size);
     if (result == MCS_NO_VARIABLE) {
-        m_persistenceReady = true; m_persistenceResult = 0; return;
+        // Persist the application's defaults immediately. This makes the
+        // SETTINGS variable visible on the first launch and ensures that
+        // a reset or power loss before the first settings interaction does
+        // not leave the application without an initial saved state.
+        m_persistenceReady = true;
+        m_persistenceResult = 0;
+        SaveSettingsToStorage();
+        return;
     }
     if (result != 0) { m_persistenceResult = result; return; }
     if (type != VARTYPE_STR || size == 0 || size >= sizeof(buffer)) {
