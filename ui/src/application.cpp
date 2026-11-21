@@ -1048,8 +1048,10 @@ void Application::RunFileSelector() {
         m_config.onCustomFileSelector(*this);
         if (m_state == StateFileSelector)
             ReturnToMenu();
-        if (m_persistenceReady)
+        if (m_settingsStore.IsOpen()) {
+            m_persistenceReady = true;
             SaveSettingsToStorage();
+        }
         return;
     }
     RunNativeFileSelector();
@@ -1065,8 +1067,10 @@ void Application::RunSettings() {
         m_config.onCustomSettings(*this);
         if (m_state == StateSettings)
             ReturnToMenu();
-        if (m_persistenceReady)
+        if (m_settingsStore.IsOpen()) {
+            m_persistenceReady = true;
             SaveSettingsToStorage();
+        }
         return;
     }
     RunNativeSettings();
