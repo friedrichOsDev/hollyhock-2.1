@@ -793,10 +793,10 @@ int Application::SetCurrentDirectory(const char *path) {
         return result;
 
     const int length = Len(normalized);
-    if (length > 0 && normalized[length - 1] != '\\\\') {
+    if (length > 0 && normalized[length - 1] != '\\') {
         if (length + 1 >= (int)sizeof(normalized))
             return ENAMETOOLONG;
-        normalized[length] = '\\\\';
+        normalized[length] = '\\';
         normalized[length + 1] = 0;
     }
     Copy(m_currentDirectory, normalized, sizeof(m_currentDirectory));
@@ -1377,7 +1377,7 @@ bool Application::RunFramebufferFileSelector() {
                      next, sizeof(next));
                 Copy(m_currentDirectory, next,
                      sizeof(m_currentDirectory));
-                Append(m_currentDirectory, "\\\\",
+                Append(m_currentDirectory, "\\",
                        sizeof(m_currentDirectory));
                 screen.Clear(Colors::White);
                 screen.DrawText(8, 12, "Scanning files...", Colors::Blue);
