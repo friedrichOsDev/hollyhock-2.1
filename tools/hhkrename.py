@@ -51,7 +51,7 @@ def _c_string_ranges(data: bytes) -> List[Tuple[int, int, int]]:
 
 
 def find_references(data: bytes, old_name: bytes):
-    """Find basename references in printable NUL-terminated strings."""
+    """Find exact basename references in printable NUL-terminated strings."""
     findings = []
     for start, end, slot_end in _c_string_ranges(data):
         string = data[start:end]
@@ -71,6 +71,7 @@ def find_references(data: bytes, old_name: bytes):
                     "slot_end": slot_end,
                     "old_string": string,
                     "name_offset": index,
+                    "token_length": len(old_name),
                     "kind": "path" if b"/" in string or b"\\" in string else "filename",
                 })
             pos = after
@@ -88,12 +89,10 @@ def patch_references(data: bytes, findings, new_name: bytes):
     for (start, end, slot_end), group in grouped.items():
         original = bytes(out[start:end])
         updated = original
-        old_name_len = len(group[0]["old_string"])  # replaced below by basename length
-        # The exact matched token length is retained in the finding to avoid
-        # accidentally using the whole surrounding path length.
-        old_token_len = group[0]["token_length"]
+        token_length = group[0]["token_length"]
+        # Apply right-to-left so earlier offsets remain valid if lengths change.
         for pos in sorted((f["name_offset"] for f in group), reverse=True):
-            updated = updated[:pos] + new_name + updated[pos + old_token_len:]
+            updated = updated[:pos] + new_name + updated[pos + token_length:]
         capacity = slot_end - start
         if len(updated) + 1 > capacity:
             raise RenameError(
