@@ -58,20 +58,24 @@ extern "C" void main() {
     };
     UI::Setting settings[] = {
         UI::Setting::Boolean(
-            "File preview", &g_demoSettings.showPreview,
+            "demo.preview.enabled", "File preview",
+            &g_demoSettings.showPreview,
             "Show a short text preview after selection"),
         UI::Setting::Integer(
-            "Preview bytes", &g_demoSettings.previewBytes,
+            "demo.preview.bytes", "Preview bytes",
+            &g_demoSettings.previewBytes,
             8, 64, 8, "Number of bytes read from the start of a file"),
         UI::Setting::Enumeration(
-            "Preview format", &g_demoSettings.previewFormat,
+            "demo.preview.format", "Preview format",
+            &g_demoSettings.previewFormat,
             previewFormatOptions, 2,
             "Display selected bytes as text or hexadecimal"),
         UI::Setting::Boolean(
-            "Show file size", &g_demoSettings.showFileSize,
+            "demo.file-size", "Show file size",
+            &g_demoSettings.showFileSize,
             "Display the selected file size"),
         UI::Setting::Action(
-            "Reset demo settings", DemoResetSettings,
+            "demo.reset", "Reset demo settings", DemoResetSettings,
             "Restore the initial values")
     };
     config.settings = settings;
