@@ -23,7 +23,10 @@ class EventDialog : public GUIDialog {
     int buttonCount;
     int event;
 public:
-    explicit EventDialog(const char *t) : GUIDialog(Height95, AlignCenter, t, KeyboardStateNone), buttonCount(0), event(0) {}
+    explicit EventDialog(const char *title)
+        : GUIDialog(Height95, AlignCenter, title, KeyboardStateNone),
+          buttonCount(0),
+          event(0) {}
     int EventID() const { return event; }
     void RegisterButton(int id) { if (buttonCount < 12) buttonIDs[buttonCount++] = id; }
     int OnEvent(GUIDialog_Wrapped *d, GUIDialog_OnEvent_Data *e) override {
@@ -54,15 +57,20 @@ class Elements {
 public:
     Elements() : used(0) {}
     ~Elements() { for (int i = 0; i < used; ++i) free(mem[i]); }
-    void AddButton(EventDialog &d, uint16_t x, uint16_t y, uint16_t r, uint16_t b, const char *t, int id, bool enabled = true) {
+    void AddButton(EventDialog &dialog, uint16_t x, uint16_t y,
+                   uint16_t right, uint16_t bottom, const char *text,
+                   int id, bool enabled = true) {
         if (used > 22) return;
         void *p = malloc(sizeof(GUIButton));
         if (!p) return;
         char *stable = CopyText(t);
         if (!stable) { free(p); return; }
-        GUIButton *q = new (p) GUIButton(x, y, r, b, stable, (uint16_t)id, enabled ? GUIButton::FlagEnabled : 0);
+        GUIButton *button = new (p) GUIButton(
+            x, y, right, bottom, stable, (uint16_t)id,
+            enabled ? GUIButton::FlagEnabled : 0);
         mem[used++] = p; mem[used++] = stable;
-        d.AddElement(*q); d.RegisterButton(id);
+        dialog.AddElement(*button);
+        dialog.RegisterButton(id);
     }
     void AddLabel(EventDialog &d, int x, int y, const char *t) {
         if (used > 22) return;
@@ -105,7 +113,14 @@ bool Equal(const char *a, const char *b) {
 }
 struct Entry { char name[NAME_LEN]; bool dir; };
 int Compare(const char *a, const char *b) {
-    while (*a && *b) { char x = Lower(*a), y = Lower(*b); if (x != y) return x < y ? -1 : 1; ++a; ++b; }
+    while (*a && *b) {
+        const char left = Lower(*a);
+        const char right = Lower(*b);
+        if (left != right)
+            return left < right ? -1 : 1;
+        ++a;
+        ++b;
+    }
     return *a == *b ? 0 : (*a ? 1 : -1);
 }
 void Sort(Entry *e, int n) {
@@ -130,7 +145,10 @@ void ShowLoadingMessage() {
 }
 void ClearLoadingMessage() {
     const int x = 2;
-    for (int row = 0; row < 4; ++row) { Debug_SetCursorPosition(x, row); Debug_PrintString("                      ", false); }
+    for (int row = 0; row < 4; ++row) {
+        Debug_SetCursorPosition(x, row);
+        Debug_PrintString("                      ", false);
+    }
     LCD_Refresh();
 }
 void Scan(const char *dir, const Config &cfg, Entry *e, int *count) {
@@ -140,7 +158,10 @@ void Scan(const char *dir, const Config &cfg, Entry *e, int *count) {
     DirectoryEntry item;
     while (directory.Next(&item) == 0) {
         bool skip = Equal(item.name, ".") || Equal(item.name, "..");
-        if (!skip && (item.isDirectory || FileFilterMatches(item.name, cfg.filters, cfg.filterCount)) && *count < MAX_ENTRIES) {
+        const bool matchesFilter =
+            item.isDirectory ||
+            FileFilterMatches(item.name, cfg.filters, cfg.filterCount);
+        if (!skip && matchesFilter && *count < MAX_ENTRIES) {
             Copy(e[*count].name, item.name, NAME_LEN);
             e[*count].dir = item.isDirectory; ++*count;
         }
@@ -152,12 +173,19 @@ void Bounds(GUIDialog &d, int row, uint16_t *x, uint16_t *y, uint16_t *r, uint16
     *y = d.GetTopY() + 8 + row * 42; *b = *y + 35;
 }
 void Button(Elements &el, EventDialog &d, int row, const char *text, int id, bool enabled = true) {
-    uint16_t x, y, r, b; Bounds(d, row, &x, &y, &r, &b); el.AddButton(d, x, y, r, b, text, id, enabled);
+    uint16_t x, y, right, bottom;
+    Bounds(d, row, &x, &y, &right, &bottom);
+    el.AddButton(d, x, y, right, bottom, text, id, enabled);
 }
 void Bottom(Elements &el, EventDialog &d, int x, int w, const char *t, int id) {
-    int y = d.GetBottomY() - 40; el.AddButton(d, d.GetLeftX() + x, y, d.GetLeftX() + x + w, y + 35, t, id);
+    const int y = d.GetBottomY() - 40;
+    el.AddButton(d, d.GetLeftX() + x, y,
+                 d.GetLeftX() + x + w, y + 35, t, id);
 }
-void PathLabel(Elements &el, EventDialog &d, const char *p) { el.AddLabel(d, d.GetLeftX() + 8, d.GetTopY() + 2, p); }
+void PathLabel(Elements &elements, EventDialog &dialog, const char *path) {
+    elements.AddLabel(dialog, dialog.GetLeftX() + 8,
+                      dialog.GetTopY() + 2, path);
+}
 void Join(const char *dir, const char *name, char *out, int cap) {
     Copy(out, dir, cap); int n = Len(out);
     if (n && out[n - 1] != '\\') Append(out, "\\", cap);
@@ -230,7 +258,10 @@ bool AddText(char *out, int *position, const char *text) {
 }
 bool AddUnsigned(char *out, int *position, unsigned int value) {
     char digits[12]; int count = 0;
-    do { digits[count++] = char('0' + value % 10U); value /= 10U; } while (value && count < (int)sizeof(digits));
+    do {
+        digits[count++] = char('0' + value % 10U);
+        value /= 10U;
+    } while (value && count < (int)sizeof(digits));
     while (count) if (!AddChar(out, position, digits[--count])) return false;
     return true;
 }
@@ -356,8 +387,12 @@ bool ParseSettings(const char *data, const Setting *settings, int count) {
         int value = 0;
         if (!ParseSigned(&p, &value)) return false;
         if ((setting.type == SettingBoolean && (type != 'B' || (value != 0 && value != 1))) ||
-            (setting.type == SettingInteger && (type != 'I' || value < setting.minimum || value > setting.maximum)) ||
-            (setting.type == SettingEnum && (type != 'E' || value < 0 || value >= setting.optionCount)))
+            (setting.type == SettingInteger &&
+             (type != 'I' || value < setting.minimum ||
+              value > setting.maximum)) ||
+            (setting.type == SettingEnum &&
+             (type != 'E' || value < 0 ||
+              value >= setting.optionCount)))
             return false;
         if (!setting.value) return false;
         values[i] = value;
@@ -469,10 +504,24 @@ bool Application::IsRunning() const { return m_state != StateExit; }
 
 void Application::RunMainMenu() {
     Elements el; EventDialog d(m_config.title ? m_config.title : "Application"); int row = 0;
-    if (m_config.showStart && m_config.onStart) Button(el, d, row++, m_config.startLabel ? m_config.startLabel : "Start", E_START);
-    if (m_config.showFileSelector) Button(el, d, row++, m_config.filesLabel ? m_config.filesLabel : "Files", E_FILES);
-    if (m_config.showSettings && (m_config.settingCount > 0 || m_config.onSettings)) Button(el, d, row++, m_config.settingsLabel ? m_config.settingsLabel : "Settings", E_SETTINGS);
-    if (m_config.showQuit) Button(el, d, row++, m_config.quitLabel ? m_config.quitLabel : "Quit", E_QUIT);
+    if (m_config.showStart && m_config.onStart) {
+        Button(el, d, row++,
+               m_config.startLabel ? m_config.startLabel : "Start", E_START);
+    }
+    if (m_config.showFileSelector) {
+        Button(el, d, row++,
+               m_config.filesLabel ? m_config.filesLabel : "Files", E_FILES);
+    }
+    if (m_config.showSettings &&
+        (m_config.settingCount > 0 || m_config.onSettings)) {
+        Button(el, d, row++,
+               m_config.settingsLabel ? m_config.settingsLabel : "Settings",
+               E_SETTINGS);
+    }
+    if (m_config.showQuit) {
+        Button(el, d, row++,
+               m_config.quitLabel ? m_config.quitLabel : "Quit", E_QUIT);
+    }
     if (!row) Button(el, d, row++, "Quit", E_QUIT);
     d.ShowDialog(); int event = d.EventID();
     if (event == E_START && m_config.onStart) m_config.onStart(*this);
@@ -483,7 +532,10 @@ void Application::RunMainMenu() {
 void Application::RunFileSelector() {
     Entry *entries = (Entry *)malloc(sizeof(Entry) * MAX_ENTRIES);
     if (!entries) { ReturnToMenu(); return; }
-    int count = 0; ShowLoadingMessage(); Scan(m_currentDirectory, m_config, entries, &count); ClearLoadingMessage();
+    int count = 0;
+    ShowLoadingMessage();
+    Scan(m_currentDirectory, m_config, entries, &count);
+    ClearLoadingMessage();
     int page = 0; bool done = false;
     while (!done && m_state == StateFileSelector) {
         Elements el; EventDialog d("Select file"); PathLabel(el, d, m_currentDirectory);
@@ -502,18 +554,32 @@ void Application::RunFileSelector() {
         d.ShowDialog(); int event = d.EventID();
         if (event == E_BACK) { ReturnToMenu(); done = true; }
         else if (event == E_UP) {
-            Parent(m_currentDirectory); ShowLoadingMessage(); Scan(m_currentDirectory, m_config, entries, &count); ClearLoadingMessage(); page = 0;
+            Parent(m_currentDirectory);
+            ShowLoadingMessage();
+            Scan(m_currentDirectory, m_config, entries, &count);
+            ClearLoadingMessage();
+            page = 0;
         } else if (event == E_PREV) { if (page > 0) --page; }
         else if (event == E_NEXT) { if ((page + 1) * ROWS < count) ++page; }
         else if (event >= E_ROW && event < E_ROW + ROWS) {
             int index = page * ROWS + event - E_ROW;
             if (index < count) {
                 if (entries[index].dir) {
-                    char next[PATH_LEN]; Join(m_currentDirectory, entries[index].name, next, sizeof(next));
-                    Copy(m_currentDirectory, next, sizeof(m_currentDirectory)); Append(m_currentDirectory, "\\", sizeof(m_currentDirectory));
-                    ShowLoadingMessage(); Scan(m_currentDirectory, m_config, entries, &count); ClearLoadingMessage(); page = 0;
+                    char next[PATH_LEN];
+                    Join(m_currentDirectory, entries[index].name,
+                         next, sizeof(next));
+                    Copy(m_currentDirectory, next,
+                         sizeof(m_currentDirectory));
+                    Append(m_currentDirectory, "\\",
+                           sizeof(m_currentDirectory));
+                    ShowLoadingMessage();
+                    Scan(m_currentDirectory, m_config, entries, &count);
+                    ClearLoadingMessage();
+                    page = 0;
                 } else {
-                    char selected[PATH_LEN]; Join(m_currentDirectory, entries[index].name, selected, sizeof(selected));
+                    char selected[PATH_LEN];
+                    Join(m_currentDirectory, entries[index].name,
+                         selected, sizeof(selected));
                     if (m_config.onFileSelected) m_config.onFileSelected(*this, selected);
                     if (m_state == StateFileSelector) ReturnToMenu();
                     done = true;
@@ -539,10 +605,14 @@ void Application::RunSettings() {
         for (int row = 0; row < visible; ++row) {
             int index = page * ROWS + row; Setting &s = m_config.settings[index];
             char label[96], value[32]; Copy(label, s.name ? s.name : "Setting", sizeof(label));
-            Append(label, ": ", sizeof(label)); Value(s, value, sizeof(value)); Append(label, value, sizeof(label));
+            Append(label, ": ", sizeof(label));
+            Value(s, value, sizeof(value));
+            Append(label, value, sizeof(label));
             Button(el, d, row, label, E_ROW + row);
         }
-        Bottom(el, d, 8, 38, "<", E_PREV); Bottom(el, d, 50, 38, ">", E_NEXT); Bottom(el, d, 94, 116, "Back", E_BACK);
+        Bottom(el, d, 8, 38, "<", E_PREV);
+        Bottom(el, d, 50, 38, ">", E_NEXT);
+        Bottom(el, d, 94, 116, "Back", E_BACK);
         d.ShowDialog(); int event = d.EventID();
         if (event == E_BACK) { ReturnToMenu(); done = true; }
         else if (event == E_PREV) { if (page > 0) --page; }
