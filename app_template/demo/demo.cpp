@@ -534,6 +534,7 @@ void DemoFileSelected(UI::Application &app, const char *path) {
                 }
             }
         }
+        file.Close();
     }
 
     DrawHeader(screen, "FILE SELECTION",
