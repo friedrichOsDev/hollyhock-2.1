@@ -3,9 +3,10 @@
 #include <ui/filesystem.hpp>
 #include <ui/types.hpp>
 
-// Include stdio after the SDK: it defines SEEK_SET/SEEK_CUR/SEEK_END macros,
-// which otherwise collide with the SDK's identically named constants.
-#include <stdio.h>
+// Avoid including stdio.h here: the SDK declares remove()/rename() with
+// signatures that conflict with the host C library on some toolchains.
+// The test only needs printf(), so declare that function directly.
+extern "C" int printf(const char *format, ...);
 
 namespace {
 
