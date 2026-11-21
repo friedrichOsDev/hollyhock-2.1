@@ -18,8 +18,7 @@ static const char *const textCaseOptions[] = {
 };
 
 static void WaitForUser() {
-    Debug_SetCursorPosition(0, 5);
-    Debug_PrintString("Press a number key.", false);
+    Debug_Printf(0, 5, false, 0, "%s", "Press a number key.");
     LCD_Refresh();
     Debug_WaitKey();
 }
@@ -46,19 +45,21 @@ static void ShowStorageInfo(UI::Application &app) {
             directoryResult = closeResult;
     }
 
-    Debug_SetCursorPosition(0, 0);
-    Debug_PrintString("Read-only storage check", false);
-    Debug_SetCursorPosition(0, 1);
-    Debug_PrintString(pathResult == 0 ? "Path normalization: OK" : "Path normalization: FAIL", false);
-    Debug_SetCursorPosition(0, 2);
-    Debug_PrintString(UI::FileSystem::Exists("fls0/") ? "fls0 root: FOUND" : "fls0 root: MISSING", false);
-    Debug_SetCursorPosition(0, 3);
+    Debug_Printf(0, 0, false, 0, "%s", "Read-only storage check");
+    Debug_Printf(0, 1, false, 0, "%s",
+        pathResult == 0
+            ? "Path normalization: OK"
+            : "Path normalization: FAIL");
+    Debug_Printf(0, 2, false, 0, "%s",
+        UI::FileSystem::Exists("fls0/")
+            ? "fls0 root: FOUND"
+            : "fls0 root: MISSING");
     if (directoryResult == 0)
         Debug_Printf(0, 3, false, 0, "Directory entries: %d", entryCount);
     else
         Debug_Printf(0, 3, false, 0, "Directory error: %d", directoryResult);
-    Debug_SetCursorPosition(0, 4);
-    Debug_Printf(0, 4, false, 0, "MCS settings status: %d", app.SettingsPersistenceResult());
+    Debug_Printf(0, 4, false, 0, "MCS settings status: %d",
+        app.SettingsPersistenceResult());
     WaitForUser();
 }
 
@@ -102,31 +103,27 @@ static void FileSelected(UI::Application &app, const char *path) {
     }
     const bool closed = !file.IsOpen();
 
-    Debug_SetCursorPosition(0, 0);
-    Debug_PrintString("Selected file (read-only)", false);
-    Debug_SetCursorPosition(0, 1);
-    Debug_PrintString(path, false);
-    Debug_SetCursorPosition(0, 2);
+    Debug_Printf(0, 0, false, 0, "%s", "Selected file (read-only)");
+    Debug_Printf(0, 1, false, 0, "%s", path);
     if (statResult == 0)
-        Debug_Printf(0, 2, false, 0, "Stat size: %u bytes", (unsigned int)info.fileSize);
+        Debug_Printf(0, 2, false, 0, "Stat size: %u bytes",
+            (unsigned int)info.fileSize);
     else
         Debug_Printf(0, 2, false, 0, "Stat error: %d", statResult);
-    Debug_SetCursorPosition(0, 3);
     if (result < 0)
         Debug_Printf(0, 3, false, 0, "Open error: %d", result);
     else if (sizeResult < 0 || seekResult < 0)
         Debug_Printf(0, 3, false, 0, "Size:%d Seek:%d", sizeResult, seekResult);
     else
-        Debug_Printf(0, 3, false, 0, "Size:%u Close:%s", (unsigned int)fileSize, closed ? "PASS" : "FAIL");
-    Debug_SetCursorPosition(0, 4);
+        Debug_Printf(0, 3, false, 0, "Size:%u Close:%s",
+            (unsigned int)fileSize, closed ? "PASS" : "FAIL");
     if (!showPreview)
-        Debug_PrintString("Preview disabled.", false);
+        Debug_Printf(0, 4, false, 0, "%s", "Preview disabled.");
     else if (bytesRead < 0)
         Debug_Printf(0, 4, false, 0, "Read error: %d", bytesRead);
     else {
-        Debug_PrintString("Text preview:", false);
-        Debug_SetCursorPosition(0, 5);
-        Debug_PrintString(preview, false);
+        Debug_Printf(0, 4, false, 0, "%s", "Text preview:");
+        Debug_Printf(0, 5, false, 0, "%s", preview);
     }
     WaitForUser();
 }
