@@ -225,16 +225,30 @@ namespace Bins {
 		if (ret < 0) {
 		    return nullptr;
 		}
-		//get address where the program should be loaded
+		// BIN files may bundle a much larger runtime than the original
+		// 128 KiB loader limit allowed (for example PythonExtra).
+		// Load the complete file instead of silently truncating its code.
+		uint32_t fileSize = 0;
+		if (f.getSize(&fileSize) < 0 || fileSize <= 0x10 ||
+		    fileSize > 0x7FFFFFFFU)
+			return nullptr;
+
+		// Get the address where the program should be loaded.
 		unsigned char *address = 0;
 		if (f.getAddr(0x0c, (const void **)&address) < 0 || !address)
 			return nullptr;
 		EntryPoint entrypoint = (EntryPoint)0x8cff0000;
-		if (address[0]==0x8c)
-				entrypoint = (EntryPoint)((address[0]<<24) + (address[1]<<16) + (address[2]<<8) + (address[3]));
+		if (address[0] == 0x8c) {
+			entrypoint = (EntryPoint)(
+				(static_cast<uint32_t>(address[0]) << 24) |
+				(static_cast<uint32_t>(address[1]) << 16) |
+				(static_cast<uint32_t>(address[2]) << 8) |
+				static_cast<uint32_t>(address[3]));
+		}
 
-		int length = f.read((void *)entrypoint, 0x20000);
-		if (length <= 0)
+		const int expectedLength = static_cast<int>(fileSize);
+		const int length = f.read((void *)entrypoint, expectedLength);
+		if (length != expectedLength)
 			return nullptr;
 		//unsigned char mode[] = {0,5,0,0,0,0};
 		//Serial_Open(mode);

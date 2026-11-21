@@ -242,13 +242,42 @@ void Render(UI::Framebuffer &fb, int selected, int total,
     fb.Present();
 }
 
+void WaitForLaunchInputRelease(const UI::Event &trigger) {
+    // Do not pass the launch gesture into the child application. Native
+    // dialogs and games may interpret the still-held EXE key or touch as
+    // their own immediate confirmation/exit action.
+    while (true) {
+        UI::Event event;
+        const int result = UI::Input::Poll(&event);
+        if (result < 0)
+            return;
+        if (result == 0)
+            continue;
+
+        if (trigger.type == UI::EventKey &&
+            event.type == UI::EventKey &&
+            event.keyCode == trigger.keyCode &&
+            event.keyAction == UI::KeyReleased)
+            return;
+
+        if (trigger.type == UI::EventTouch &&
+            event.type == UI::EventTouch &&
+            event.touchAction == UI::TouchUp)
+            return;
+    }
+}
+
 void LaunchSelected(UI::Framebuffer &fb, int selected,
+                    const UI::Event &trigger,
                     char *status, int statusCap, bool &running) {
     const int apps = AppCount();
     const int bins = BinCount();
     const int total = apps + bins + ExecCount();
     if (selected < 0 || selected >= total)
         return;
+
+    // Wait until EXE/touch is released before the child receives input.
+    WaitForLaunchInputRelease(trigger);
 
     // Stop drawing before another program takes control.
     fb.End();
@@ -334,7 +363,7 @@ void Run() {
                     selected = nextPage < total ? nextPage : total - 1;
                     redraw = true;
                 } else if (event.keyCode == UI::KeyEXE) {
-                    LaunchSelected(fb, selected, status, sizeof(status), running);
+                    LaunchSelected(fb, selected, event, status, sizeof(status), running);
                     if (!running) break;
                     redraw = true;
                 } else if (event.keyCode == UI::KeyPowerClear ||
@@ -363,7 +392,7 @@ void Run() {
                         selected = first >= rows ? first - rows : 0;
                         redraw = true;
                     } else if (action == 1) {
-                        LaunchSelected(fb, selected, status, sizeof(status), running);
+                        LaunchSelected(fb, selected, event, status, sizeof(status), running);
                         if (!running) break;
                         redraw = true;
                     } else if (action == 2 && total > 0) {
