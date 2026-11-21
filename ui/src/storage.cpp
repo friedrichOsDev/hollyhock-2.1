@@ -1,5 +1,6 @@
 #include <ui/storage.hpp>
 #include <sdk/os/file.hpp>
+#include <sdk/os/mem.hpp>
 #include <stddef.h>
 
 namespace UI {
@@ -75,11 +76,33 @@ int PersistentStore::Load(const char *name, uint8_t *type, void *buffer,
     for (uint32_t i = 0; i < storedSize; ++i) destination[i] = source[i];
     return 0;
 }
+
 int PersistentStore::Save(const char *name, uint8_t type,
                           const void *data, uint32_t size) {
     if (!m_open) return MCS_NO_FOLDER;
-    if (!ValidVariableName(name) || (!data && size != 0)) return EINVAL;
-    return MCS_SetVariable(m_folder, name, type, size,
-                           const_cast<void *>(data));
+    if (!ValidVariableName(name) || !data || size == 0)
+        return EINVAL;
+
+    // The calculator's MCS stores data in 32-bit units. Existing Hollyhock
+    // applications round payload sizes up to a multiple of four bytes before
+    // calling MCS_SetVariable(). Copy into malloc-aligned storage as well,
+    // because callers may pass an arbitrarily aligned byte buffer.
+    if (size > 0xFFFFFFFCU)
+        return EOUTOFBOUND;
+    const uint32_t alignedSize = (size + 3U) & ~3U;
+    uint8_t *alignedData = static_cast<uint8_t *>(malloc(alignedSize));
+    if (!alignedData)
+        return ENOMEM;
+
+    const uint8_t *source = static_cast<const uint8_t *>(data);
+    for (uint32_t i = 0; i < size; ++i)
+        alignedData[i] = source[i];
+    for (uint32_t i = size; i < alignedSize; ++i)
+        alignedData[i] = 0;
+
+    const int result = MCS_SetVariable(
+        m_folder, name, type, alignedSize, alignedData);
+    free(alignedData);
+    return result;
 }
 } // namespace UI
