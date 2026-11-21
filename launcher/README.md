@@ -35,10 +35,11 @@ python3 tools/hhkmeta.py set application.bin --name "New Display Name"
 python3 tools/hhkrename.py PythonExtra-hh2.bin PythonExtra.bin
 ```
 
-The rename utility does not change launcher metadata. It preserves the volume
-prefix found in the binary (`fls0` or `drv0`), refuses to overwrite an existing
-destination, and stops if the replacement path does not fit in the existing
-zero-filled buffer. See the
+The rename utility scans printable NUL-terminated ASCII strings for the old
+filename as a complete token (including path basenames). It updates matches
+when the replacement fits existing zero-padding; if no matches are found, it
+performs a plain rename without changing file contents. It refuses to
+overwrite an existing destination. It does not change launcher metadata. See the
 [compiled metadata and file-path guide](../doc/user/metadata.md) for details.
 
 ## UI controls
