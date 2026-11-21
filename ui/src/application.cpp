@@ -1198,7 +1198,11 @@ bool Application::RunFramebufferMainMenu() {
 
         switch (actions[selected]) {
         case ACTION_START:
+            // Release the library renderer while application-owned code runs.
+            screen.End();
             m_config.onStart(*this);
+            if (m_state == StateMainMenu && !screen.Begin())
+                Close();
             break;
         case ACTION_FILES:
             OpenFileSelector();
@@ -1612,10 +1616,18 @@ bool Application::RunFramebufferSettings() {
         }
 
         Setting &setting = m_config.settings[selected];
-        if (adjustment != 0 && setting.type != SettingAction)
+        if (adjustment != 0 && setting.type != SettingAction) {
             AdjustSetting(selected, adjustment);
-        else if (activate)
+        } else if (activate) {
+            // Action callbacks may open their own framebuffer UI. Detach the
+            // library renderer for the duration of that callback.
+            const bool isAction = setting.type == SettingAction;
+            if (isAction)
+                screen.End();
             AdjustSetting(selected, 1);
+            if (isAction && m_state == StateSettings && !screen.Begin())
+                ReturnToMenu();
+        }
 
         if ((adjustment != 0 || activate) &&
             m_state != StateSettings)
