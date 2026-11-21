@@ -29,6 +29,8 @@ enum SettingType {
 };
 
 struct Setting {
+    // Stable persistence key. If null, the setting name is used as a fallback.
+    const char *id;
     const char *name;
     const char *description;
     SettingType type;
@@ -46,13 +48,24 @@ struct Setting {
 
     static Setting Boolean(const char *name, bool *value,
                            const char *description = 0);
+    static Setting Boolean(const char *id, const char *name, bool *value,
+                           const char *description = 0);
     static Setting Integer(const char *name, int *value,
+                           int minimum, int maximum, int step = 1,
+                           const char *description = 0);
+    static Setting Integer(const char *id, const char *name, int *value,
                            int minimum, int maximum, int step = 1,
                            const char *description = 0);
     static Setting Enumeration(const char *name, int *value,
                                const char *const *options, int optionCount,
                                const char *description = 0);
+    static Setting Enumeration(const char *id, const char *name, int *value,
+                               const char *const *options, int optionCount,
+                               const char *description = 0);
     static Setting Action(const char *name, ActionCallback callback,
+                          const char *description = 0);
+    static Setting Action(const char *id, const char *name,
+                          ActionCallback callback,
                           const char *description = 0);
 };
 
