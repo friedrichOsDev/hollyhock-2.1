@@ -1,6 +1,6 @@
 # CPV Video Format Specification
 
-**Document:** CPV v1.0  
+**Document:** CPV v1.1  
 **File extension:** `.cpv`  
 **Status:** Proposed specification — implementation baseline  
 **Target platform:** Casio fx-CP400 running Hollyhock 2.1  
@@ -105,7 +105,11 @@ A v1 encoder MUST NOT use SKIP merely because two pixels are visually similar. A
 
 The file contains exactly one palette for the complete video. Every palette entry is a 16-bit RGB565 value.
 
-Palette indices are always one byte, even when fewer than 256 palette entries are present. This intentionally avoids bit extraction and keeps the decoder's pixel loop simple.
+Palette indices in INDEX_LITERAL and DELTA_MASK packets are packed using the minimum fixed bit width required by the global palette:
+
+`index_bits = max(1, ceil(log2(palette_count)))`
+
+The bit widths are 1, 2, 3, 4, 5, 6, 7, or 8 bits. Bits are stored least-significant-bit first. Each packet starts at a byte boundary; unused high bits in its final byte MUST be zero. INDEX_REPEAT continues to store its single index as one byte for simpler decoding.
 
 A palette index MUST be in the range `0 .. palette_count - 1`.
 
@@ -125,7 +129,8 @@ RAW565 packets bypass the palette and store direct RGB565 values. They are a qua
 | Nominal frame rate | Greater than 0 and no greater than 30 FPS |
 | Recommended frame rate | 10 FPS |
 | Palette entries | 1–256 |
-| Palette index size | 1 byte |
+| INDEX_LITERAL index size | 1–8 bits (minimum for palette) |
+| INDEX_REPEAT index size | 1 byte |
 | Pixel format | RGB565 |
 | Frame types | I-frame and P-frame |
 | Audio | Not supported |
@@ -248,7 +253,7 @@ The file header is exactly **64 bytes**.
 |---:|---|---|---:|---|
 | 0 | `magic` | char[4] | 4 | ASCII `CPV\0` |
 | 4 | `version_major` | uint8 | 1 | 1 |
-| 5 | `version_minor` | uint8 | 1 | 0 |
+| 5 | `version_minor` | uint8 | 1 | 1 for CPV v1.1; v1.0 readers MAY also be supported |
 | 6 | `header_size` | uint16 | 2 | 64 |
 | 8 | `flags` | uint32 | 4 | 0 in v1 |
 | 12 | `width` | uint16 | 2 | 1–528 |
@@ -270,7 +275,7 @@ The file header is exactly **64 bytes**.
 Before playback, a decoder MUST verify:
 
 - Magic is exactly `CPV\0`.
-- Major version is 1 and minor version is 0.
+- Major version is 1 and minor version is 0 or 1. Version 1.0 uses byte-sized INDEX_LITERAL values and has no frame compression or DELTA_MASK packets; version 1.1 enables the additions in this specification.
 - Header size is exactly 64.
 - Flags and all reserved fields are zero.
 - Width and height are within the specified limits.
@@ -358,14 +363,31 @@ Every stored frame is represented by a frame record. Its fixed header is exactly
 |---:|---|---|---:|---|
 | 0 | `magic` | char[4] | 4 | ASCII `FRM1` |
 | 4 | `frame_type` | uint8 | 1 | 0 = I-frame, 1 = P-frame |
-| 5 | `flags` | uint8 | 1 | 0 in v1 |
+| 5 | `flags` | uint8 | 1 | Bit 0: payload is an independent LZ4 block; all other bits MUST be zero |
 | 6 | `header_size` | uint16 | 2 | 20 |
 | 8 | `frame_number` | uint32 | 4 | Sequential stored-record number, starting at 0 |
 | 12 | `duration_ms` | uint32 | 4 | Display duration |
 | 16 | `payload_size` | uint32 | 4 | Number of payload bytes |
 | | **Total** | | **20** | |
 
-The payload begins immediately after the frame header and contains exactly `payload_size` bytes.
+The payload begins immediately after the frame header and contains exactly `payload_size` stored bytes.
+
+### 9.3 Optional independent LZ4 frame payload
+
+In CPV v1.1, frame flag bit 0 (`FRAME_FLAG_LZ4 = 0x01`) indicates that the stored frame payload is a raw LZ4 block. Each frame is compressed independently; there is no cross-frame LZ4 dictionary.
+
+For a compressed frame, the stored payload is:
+
+| Field | Type | Size |
+|---|---|---:|
+| `uncompressed_size` | uint32 little-endian | 4 bytes |
+| `lz4_block` | raw LZ4 block | remaining payload bytes |
+
+The four-byte size is the exact byte count of the uncompressed packet stream. The LZ4 block MUST decompress to exactly this size. The decoder MUST validate the size before allocating or decompressing; it MUST NOT allow the decompressed packet stream to exceed `3 × width × height` bytes. This bound covers the maximum normal packet overhead per pixel.
+
+If frame flag bit 0 is clear, the stored payload is the ordinary packet stream. A v1.0 frame MUST have flags equal to zero. A v1.1 encoder SHOULD use LZ4 only when the four-byte size prefix plus compressed block is smaller than the original packet stream by a worthwhile margin. An uncompressed frame does not need an LZ4 dependency.
+
+LZ4 is used for its bounded, fast block decoder and is an optional second compression layer. It does not change packet semantics, delta reference rules, or seeking: a decoder decompresses only the selected frame before parsing its packet stream.
 
 The next frame begins at:
 
@@ -412,7 +434,7 @@ There are exactly four packet types:
 | `10` | SKIP | Preserve pixels from the previous frame |
 | `11` | RAW565 | A sequence of direct RGB565 pixels |
 
-The two most significant bits of the first packet byte contain the opcode. The remaining bits encode the run length.
+The two most significant bits of the first packet byte contain the primary opcode. The remaining bits encode the run length. DELTA_MASK is an extended SKIP subtype and does not consume a new primary opcode.
 
 ### 10.1 Compact packet header
 
@@ -469,9 +491,9 @@ Packet layout:
 
 The packet contains exactly `run_length` index bytes after the packet header.
 
-Every index MUST be smaller than `palette_count`.
+Indices are packed with `index_bits = max(1, (palette_count - 1).bit_length())` bits per index, least-significant-bit first. The packed byte count is `ceil(run_length × index_bits / 8)`. Every unpacked index MUST be smaller than `palette_count`. Unused high bits in the final byte MUST be zero. The decoder writes the corresponding palette RGB565 value for each index.
 
-The decoder writes the corresponding palette RGB565 value for each index.
+For example, a 64-colour palette uses six bits per index, reducing a long literal stream from one byte per pixel to 0.75 bytes per pixel. A 256-colour palette still uses eight bits.
 
 INDEX_LITERAL is intended for changed areas containing several different palette colours. It avoids the overhead of emitting a separate repeat packet for every colour transition.
 
@@ -514,6 +536,25 @@ For each pixel covered by SKIP, the decoder retains the RGB565 value already sto
 A decoder MUST reject SKIP in an I-frame.
 
 SKIP is intended for unchanged pixels and is particularly effective for animation, screen recordings, stationary backgrounds, and low-motion footage.
+
+#### DELTA_MASK — extended SKIP packet (CPV v1.1)
+
+A DELTA_MASK packet represents a mixed span containing both unchanged and changed pixels. It uses the SKIP opcode with a reserved long-length sentinel:
+
+| Bytes | Meaning |
+|---|---|
+| `0xA0 0x00` | SKIP opcode, long form, reserved length value zero |
+| `span_length` | uint16 little-endian, 1–65,535 pixels |
+| `mask` | `ceil(span_length / 8)` bytes, one bit per pixel |
+| `changed_indices` | bit-packed palette indices for mask bits set to 1, in raster order |
+
+Mask bits are least-significant-bit first. A set bit means that pixel is changed and the decoder reads one palette index for it. A clear bit means the pixel is unchanged and the decoder leaves the reference pixel untouched. The number of following indices is the population count of the first `span_length` mask bits. Unused high mask bits and unused high bits in the final packed-index byte MUST be zero.
+
+DELTA_MASK is valid only in P-frames. It cannot contain RAW565 pixels; the encoder MUST split out direct-colour pixels into ordinary RAW565 packets. A decoder MUST reject a zero span, a span that exceeds the remaining frame pixels, truncated mask or index data, invalid palette indices, non-zero padding bits, and any DELTA_MASK in an I-frame.
+
+The encoder SHOULD compare the complete encoded size of the mask form against the ordinary sequence of SKIP and data packets, including all headers. It MUST emit DELTA_MASK only when the mask form is strictly smaller. This avoids adding overhead to simple motion or contiguous changed regions.
+
+The sentinel is invalid as an ordinary long SKIP length (ordinary long packet lengths are 33–8,191). It is therefore unambiguous for a v1.1 decoder. A v1.0 decoder rejects it as an invalid packet length.
 
 ### 10.5 RAW565 — opcode 11
 
@@ -580,6 +621,7 @@ The decoder begins at pixel position zero:
 - INDEX_LITERAL writes the specified palette colours.
 - INDEX_REPEAT writes one palette colour repeatedly.
 - SKIP keeps existing pixels.
+- DELTA_MASK selectively writes changed palette pixels and keeps clear-mask pixels.
 - RAW565 writes direct RGB565 values.
 
 After the payload has been decoded, the position MUST equal `width × height`.
@@ -842,6 +884,23 @@ while frame_payload_bytes_remaining > 0:
     first = read_u8()
     opcode = first >> 6
 
+    if opcode == SKIP and first == 0xA0 and peek_u8() == 0x00:
+        require minor_version >= 1
+        consume_u8()  # reserved long-length sentinel
+        span_length = read_u16_le()
+        require 1 <= span_length <= 65535
+        require frame_type == P_FRAME
+        mask = read_bytes(ceil(span_length / 8))
+        changed_count = popcount(mask[0:span_length bits])
+        indices = read_bitpacked_indices(changed_count, index_bits)
+        for each bit in mask:
+            if bit is set:
+                require next index < palette_count
+                surface[pixel_position] = palette[next index]
+            pixel_position += 1
+        require unused mask and index padding bits are zero
+        continue
+
     if (first & 0x20) == 0:
         run_length = (first & 0x1F) + 1
     else:
@@ -853,8 +912,8 @@ while frame_payload_bytes_remaining > 0:
 
     switch opcode:
         INDEX_LITERAL:
-            repeat run_length times:
-                index = read_u8()
+            indices = read_bitpacked_indices(run_length, index_bits)
+            for index in indices:
                 require index < palette_count
                 surface[pixel_position] = palette[index]
                 pixel_position += 1
@@ -877,6 +936,14 @@ while frame_payload_bytes_remaining > 0:
 
 require pixel_position == width * height
 require frame_payload_bytes_remaining == 0
+
+Before packet parsing, if frame flag bit 0 is set:
+    require minor_version >= 1
+    uncompressed_size = read_u32_le()
+    require uncompressed_size <= 3 * width * height
+    packet_stream = lz4_decompress_exactly(remaining_payload, uncompressed_size)
+otherwise:
+    packet_stream = stored_payload
 ```
 
 A production decoder MUST check the remaining frame payload before every read. The pseudocode omits those repeated bounds checks for readability.
@@ -1008,19 +1075,21 @@ The desktop encoder and calculator decoder have different responsibilities. Pale
 
 ## 19. Compatibility and versioning
 
-CPV v1 requires:
+CPV v1.1 requires:
 
 - Major version 1.
-- Minor version 0.
+- Minor version 1 for bit-packed palette literals, DELTA_MASK, and optional per-frame LZ4.
+- Minor version 0 files retain the original byte-index packet semantics and have no compression flags.
 - A 64-byte file header.
 - A 20-byte frame header.
-- The four packet opcodes defined in Section 10.
-- The packet-length encoding defined in Section 10.1.
+- The four primary packet opcodes and the DELTA_MASK SKIP extension defined in Section 10.
+- The packet-length encoding and reserved DELTA_MASK sentinel defined in Section 10.1.
+- The bit-packed INDEX_LITERAL representation and optional independent LZ4 block representation.
 - An `IDX1` index at the end of the file.
 
 A decoder MUST reject unknown major versions.
 
-A strict v1.0 decoder MUST reject a non-zero reserved field or flag. Any future change that alters packet semantics, reconstruction rules, or required header layout requires a new major version.
+A strict v1.0 decoder MUST reject a non-zero frame flag, DELTA_MASK sentinel, or other v1.1-only encoding. A v1.1 decoder MUST accept v1.0 files by using eight-bit INDEX_LITERAL values and rejecting v1.1-only flags and packets in minor version 0. Unknown frame flag bits MUST be rejected. Any future change that alters the container header, reconstruction model, or core packet grammar requires a new major version.
 
 ---
 
@@ -1063,7 +1132,11 @@ A CPV v1 implementation SHOULD test every packet type and boundary.
 - Short packets with lengths 1, 2, and 32.
 - Long packets with lengths 33, 255, 256, and 8,191.
 - Runs longer than 8,191 split across multiple packets.
-- INDEX_LITERAL with varied palette indices.
+- INDEX_LITERAL with varied palette indices at every supported bit width (1–8).
+- Bit-packed literal packets with byte alignment and zero padding checks.
+- DELTA_MASK spans of lengths 1, 7, 8, 9, 32, and 65,535.
+- DELTA_MASK truncation, invalid indices, non-zero padding, zero length, and I-frame rejection.
+- LZ4-compressed and uncompressed frames, including invalid declared sizes and truncated blocks.
 - INDEX_REPEAT with a single palette index.
 - SKIP in a P-frame.
 - RAW565 with known little-endian RGB565 values.
