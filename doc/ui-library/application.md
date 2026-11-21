@@ -96,7 +96,7 @@ config.settingsRenderer = UI::MenuRenderer::Framebuffer;
 
 A Custom renderer without a callback safely falls back to Native. Custom callbacks should run their own input loop and return after requesting a transition. A custom main-menu callback that returns while the application is still in the main-menu state exits the application, matching the legacy `onStart` custom-screen behavior. Custom file-selector and settings callbacks that return without changing state return to the main menu.
 
-The built-in framebuffer main menu supports UP/DOWN, EXE, and touch. The framebuffer file selector supports UP/DOWN, LEFT/RIGHT page navigation, EXE, BACKSPACE to move to the parent directory, touch, and the action-bar Escape event. The framebuffer settings menu supports UP/DOWN, LEFT/RIGHT value changes, EXE, touch, and page navigation.
+The built-in framebuffer main menu supports UP/DOWN, EXE, and touch. The framebuffer file selector supports UP/DOWN, LEFT/RIGHT page navigation, EXE, BACKSPACE to move to the parent directory, touch, and the action-bar Escape event. The framebuffer settings menu supports UP/DOWN, LEFT/RIGHT value changes, EXE, touch, and page navigation. File and settings page sizes adapt to the LCD height, up to five rows per page.
 
 ## Custom main menu
 
