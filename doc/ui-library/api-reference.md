@@ -57,18 +57,32 @@ Custom callbacks own the drawing and event loop. Lifecycle and persistence remai
 
 ## Config
 
-| Member | Type | Default |
-| --- | --- | --- |
-| showMainMenu | bool | true |
-| showStart, showFileSelector, showSettings, showQuit | bool | true, false, false, true |
-| manageCalculatorLifecycle | bool | true |
-| settingsFolder | const char * | null |
-| settings | Setting * | null |
-| settingCount | int | 0 |
-| filters | const FileFilter * | null |
-| filterCount | int | 0 |
+| Member | Type | Default | Purpose |
+| --- | --- | --- | --- |
+| title | const char * | "Application" | Main menu title |
+| startLabel, filesLabel, settingsLabel, quitLabel | const char * | Default labels | Menu labels |
+| settingsFolder | const char * | null | Optional 1-8 character MCS folder |
+| showMainMenu | bool | true | Show the main menu; false calls onStart directly |
+| showStart | bool | true | Allow the Start entry |
+| showFileSelector | bool | false | Enable file selection |
+| showSettings | bool | false | Enable settings |
+| showQuit | bool | true | Show Quit |
+| manageCalculatorLifecycle | bool | true | Let Application call calcInit()/calcEnd() |
+| mainMenuRenderer | MenuRenderer | Native | Main-menu renderer |
+| fileSelectorRenderer | MenuRenderer | Native | File-selector renderer |
+| settingsRenderer | MenuRenderer | Native | Settings renderer |
+| onStart | ActionCallback | null | Start/custom dashboard callback |
+| onSettings | ActionCallback | null | Callback used by the native/framebuffer settings path when no Setting array exists |
+| onFileSelected | FileCallback | null | Called with a normalized selected path |
+| onCustomMainMenu | ActionCallback | null | Custom main-menu event loop |
+| onCustomFileSelector | ActionCallback | null | Custom file-selector event loop |
+| onCustomSettings | ActionCallback | null | Custom settings event loop |
+| filters, filterCount | FileFilter array, int | null, 0 | File extensions accepted by built-in selectors |
+| settings, settingCount | Setting array, int | null, 0 | Application-owned setting definitions |
 
-Set showMainMenu to false to call onStart directly and create a custom application screen. After the built-in file selector or settings returns, onStart is invoked again.
+Keep all strings, arrays, and values referenced by Config alive until Run() returns. Application copies Config field by field, but the pointer members still refer to application-owned storage.
+
+Set showMainMenu to false to call onStart directly. When onStart requests OpenFileSelector() or OpenSettings(), the selected screen is run and onStart is called again when the application returns to the main state.
 
 ## Framebuffer
 
@@ -96,7 +110,7 @@ public:
 };
 ~~~
 
-Framebuffer is non-copyable. It attaches to LCD VRAM and does not allocate a second buffer. Drawing modifies VRAM; Present() refreshes the display. Colors are RGB565. UI::Colors provides standard colors. The built-in 5x7 font supports printable ASCII; DrawText() processes no more than 512 input bytes.
+Framebuffer is non-copyable. It attaches to LCD VRAM and does not allocate a second buffer. Drawing modifies VRAM; Present() refreshes the display. Colors are RGB565. UI::Colors provides standard colors. The built-in 5x7 font supports printable ASCII 32-126; lowercase letters are drawn using uppercase glyphs. DrawText() handles newline, carriage return, and tab, and processes at most 512 input bytes.
 
 ## Input
 
@@ -144,7 +158,7 @@ enum SettingType {
 };
 ~~~
 
-Setting::Boolean, Setting::Integer, Setting::Enumeration, and Setting::Action create entries for the built-in settings screen. Persistent settings store Boolean, Integer, and Enumeration values, and ignore Action values. The serializer supports at most 32 entries and a payload smaller than 512 bytes.
+Setting::Boolean, Setting::Integer, Setting::Enumeration, and Setting::Action create entries for the built-in or custom settings screen. Integer values use their configured range and step; enumeration values wrap through their options. Action entries invoke their callback on a positive adjustment. Persistent settings store Boolean, Integer, and Enumeration values, and serialize Action entries as markers without a stored value. The serializer supports at most 32 entries and a payload smaller than 512 bytes.
 
 ## PersistentStore
 
@@ -225,7 +239,7 @@ Directory is non-copyable and closes an open search handle in its destructor.
 
 ## File filters
 
-FileFilter matches file-name suffixes case-insensitively. Directories remain visible regardless of filter.
+FileFilter stores an extension and optional description. FileFilterMatches(filename, filters, count) tests filename suffixes case-insensitively. A null filter array or a non-positive count allows all files. Directories remain visible regardless of filter.
 
 ## SDK boundary
 
