@@ -329,7 +329,7 @@ void Value(const Setting &s, char *out, int cap) {
     }
 }
 
-void Adjust(Setting &s, Application &app) {
+void Adjust(Setting &s, Application &app, int direction = 1) {
     if (s.type == SettingAction) {
         if (s.action)
             s.action(app);
@@ -351,20 +351,38 @@ void Adjust(Setting &s, Application &app) {
         }
 
         const int step = s.step > 0 ? s.step : 1;
-        const unsigned int distance =
-            static_cast<unsigned int>(s.maximum) -
-            static_cast<unsigned int>(*v);
-        if (static_cast<unsigned int>(step) > distance)
-            *v = s.minimum;
-        else
-            *v += step;
+        if (direction < 0) {
+            const unsigned int distance =
+                static_cast<unsigned int>(*v) -
+                static_cast<unsigned int>(s.minimum);
+            if (*v < s.minimum || *v > s.maximum ||
+                static_cast<unsigned int>(step) > distance)
+                *v = s.maximum;
+            else
+                *v -= step;
+        } else {
+            const unsigned int distance =
+                static_cast<unsigned int>(s.maximum) -
+                static_cast<unsigned int>(*v);
+            if (static_cast<unsigned int>(step) > distance)
+                *v = s.minimum;
+            else
+                *v += step;
+        }
     } else if (s.type == SettingEnum &&
                s.options && s.optionCount > 0) {
         int *v = static_cast<int *>(s.value);
-        if (*v < 0 || *v >= s.optionCount || *v == s.optionCount - 1)
-            *v = 0;
-        else
-            ++*v;
+        if (direction < 0) {
+            if (*v <= 0 || *v >= s.optionCount)
+                *v = s.optionCount - 1;
+            else
+                --*v;
+        } else {
+            if (*v < 0 || *v >= s.optionCount || *v == s.optionCount - 1)
+                *v = 0;
+            else
+                ++*v;
+        }
     }
 }
 
@@ -743,11 +761,52 @@ void Application::OpenSettings() {
         m_state = StateSettings;
 }
 
+int Application::SelectFile(const char *path) {
+    if (m_state != StateFileSelector)
+        return EINVAL;
+
+    char normalized[PATH_LEN];
+    const int result =
+        FileSystem::NormalizePath(path, normalized, sizeof(normalized));
+    if (result < 0)
+        return result;
+
+    if (m_config.onFileSelected)
+        m_config.onFileSelected(*this, normalized);
+
+    // A callback may explicitly open another menu or close the application.
+    if (m_state == StateFileSelector)
+        ReturnToMenu();
+    return 0;
+}
+
+const char *Application::CurrentDirectory() const {
+    return m_currentDirectory;
+}
+
+int Application::SetCurrentDirectory(const char *path) {
+    char normalized[PATH_LEN];
+    const int result =
+        FileSystem::NormalizePath(path, normalized, sizeof(normalized));
+    if (result < 0)
+        return result;
+
+    const int length = Len(normalized);
+    if (length > 0 && normalized[length - 1] != '\\\\') {
+        if (length + 1 >= (int)sizeof(normalized))
+            return ENAMETOOLONG;
+        normalized[length] = '\\\\';
+        normalized[length + 1] = 0;
+    }
+    Copy(m_currentDirectory, normalized, sizeof(m_currentDirectory));
+    return 0;
+}
+
 bool Application::IsRunning() const {
     return m_state != StateExit;
 }
 
-void Application::RunMainMenu() {
+void Application::RunNativeMainMenu() {
     Elements elements;
     EventDialog dialog(m_config.title ? m_config.title : "Application");
     int row = 0;
@@ -784,7 +843,7 @@ void Application::RunMainMenu() {
         Close();
     }
 }
-void Application::RunFileSelector() {
+void Application::RunNativeFileSelector() {
     Entry *entries = (Entry *)malloc(sizeof(Entry) * MAX_ENTRIES);
     if (!entries) {
         ReturnToMenu();
@@ -856,10 +915,7 @@ void Application::RunFileSelector() {
                     char selected[PATH_LEN];
                     Join(m_currentDirectory, entries[index].name,
                          selected, sizeof(selected));
-                    if (m_config.onFileSelected)
-                        m_config.onFileSelected(*this, selected);
-                    if (m_state == StateFileSelector)
-                        ReturnToMenu();
+                    SelectFile(selected);
                     done = true;
                 }
             }
@@ -867,7 +923,7 @@ void Application::RunFileSelector() {
     }
     free(entries);
 }
-void Application::RunSettings() {
+void Application::RunNativeSettings() {
     if (m_config.onSettings &&
         (!m_config.settings || m_config.settingCount <= 0)) {
         m_config.onSettings(*this);
@@ -933,4 +989,595 @@ void Application::RunSettings() {
         }
     }
 }
+
+void Application::RunMainMenu() {
+    if (m_config.mainMenuRenderer == MenuRenderer::Framebuffer) {
+        RunFramebufferMainMenu();
+        return;
+    }
+    if (m_config.mainMenuRenderer == MenuRenderer::Custom &&
+        m_config.onCustomMainMenu) {
+        m_config.onCustomMainMenu(*this);
+        // Like onStart in legacy custom-screen mode, a custom main menu owns
+        // its event loop. Returning without requesting a transition exits.
+        if (m_state == StateMainMenu)
+            m_state = StateExit;
+        return;
+    }
+    // Custom without a callback safely falls back to the native menu.
+    RunNativeMainMenu();
+}
+
+void Application::RunFileSelector() {
+    if (m_config.fileSelectorRenderer == MenuRenderer::Framebuffer) {
+        RunFramebufferFileSelector();
+        return;
+    }
+    if (m_config.fileSelectorRenderer == MenuRenderer::Custom &&
+        m_config.onCustomFileSelector) {
+        m_config.onCustomFileSelector(*this);
+        if (m_state == StateFileSelector)
+            ReturnToMenu();
+        if (m_persistenceReady)
+            SaveSettingsToStorage();
+        return;
+    }
+    RunNativeFileSelector();
+}
+
+void Application::RunSettings() {
+    if (m_config.settingsRenderer == MenuRenderer::Framebuffer) {
+        RunFramebufferSettings();
+        return;
+    }
+    if (m_config.settingsRenderer == MenuRenderer::Custom &&
+        m_config.onCustomSettings) {
+        m_config.onCustomSettings(*this);
+        if (m_state == StateSettings)
+            ReturnToMenu();
+        if (m_persistenceReady)
+            SaveSettingsToStorage();
+        return;
+    }
+    RunNativeSettings();
+}
+
+bool Application::RunFramebufferMainMenu() {
+    Framebuffer screen;
+    if (!screen.Begin()) {
+        Close();
+        return false;
+    }
+
+    enum { ACTION_START = 1, ACTION_FILES, ACTION_SETTINGS, ACTION_QUIT };
+    const char *labels[4];
+    int actions[4];
+    int count = 0;
+
+    if (m_config.showStart && m_config.onStart) {
+        labels[count] = m_config.startLabel ? m_config.startLabel : "Start";
+        actions[count++] = ACTION_START;
+    }
+    if (m_config.showFileSelector) {
+        labels[count] = m_config.filesLabel ? m_config.filesLabel : "Files";
+        actions[count++] = ACTION_FILES;
+    }
+    if (m_config.showSettings &&
+        (m_config.settingCount > 0 || m_config.onSettings ||
+         m_config.onCustomSettings)) {
+        labels[count] = m_config.settingsLabel
+            ? m_config.settingsLabel : "Settings";
+        actions[count++] = ACTION_SETTINGS;
+    }
+    if (m_config.showQuit) {
+        labels[count] = m_config.quitLabel ? m_config.quitLabel : "Quit";
+        actions[count++] = ACTION_QUIT;
+    }
+    if (count == 0) {
+        labels[count] = "Quit";
+        actions[count++] = ACTION_QUIT;
+    }
+
+    int selected = 0;
+    const int top = 54;
+    while (m_state == StateMainMenu) {
+        screen.Clear(Colors::White);
+        screen.FillRect(0, 0, screen.Width(), 34, Colors::Black);
+        screen.DrawText(8, 12,
+            m_config.title ? m_config.title : "Application", Colors::White);
+        screen.DrawLine(8, 42, screen.Width() - 8, 42, Colors::Gray);
+
+        int rowHeight = 38;
+        const int available = screen.Height() - top - 30;
+        if (count > 0 && available / count < rowHeight)
+            rowHeight = available / count;
+        if (rowHeight < 18)
+            rowHeight = 18;
+
+        for (int i = 0; i < count; ++i) {
+            const int y = top + i * rowHeight;
+            if (i == selected) {
+                screen.FillRect(8, y, screen.Width() - 16,
+                                rowHeight - 3, Colors::Blue);
+                screen.DrawText(16, y + (rowHeight - 7) / 2,
+                                labels[i], Colors::White);
+            } else {
+                screen.DrawRect(8, y, screen.Width() - 16,
+                                rowHeight - 3, Colors::Gray);
+                screen.DrawText(16, y + (rowHeight - 7) / 2,
+                                labels[i], Colors::Black);
+            }
+        }
+
+        screen.DrawText(8, screen.Height() - 16,
+                        "UP/DOWN + EXE or touch", Colors::Gray);
+        screen.Present();
+
+        bool activate = false;
+        UI::Event event;
+        while (m_state == StateMainMenu) {
+            const int result = Input::Poll(&event);
+            if (result < 0) {
+                Close();
+                break;
+            }
+            if (result == 0)
+                continue;
+
+            if (event.type == EventSystem &&
+                event.systemEvent == SystemActionBarEscape) {
+                Close();
+                break;
+            }
+            if (event.type == EventKey &&
+                event.keyAction == KeyPressed) {
+                if (event.keyCode == KeyUp) {
+                    selected = (selected + count - 1) % count;
+                    break;
+                }
+                if (event.keyCode == KeyDown) {
+                    selected = (selected + 1) % count;
+                    break;
+                }
+                if (event.keyCode == KeyEXE) {
+                    activate = true;
+                    break;
+                }
+                if (event.keyCode == KeyPowerClear) {
+                    Close();
+                    break;
+                }
+            } else if (event.type == EventTouch &&
+                       event.touchAction == TouchDown) {
+                const int y = event.y;
+                const int row = (y - top) / rowHeight;
+                if (y >= top && row >= 0 && row < count) {
+                    selected = row;
+                    activate = true;
+                }
+                break;
+            }
+        }
+
+        if (!activate || m_state != StateMainMenu)
+            continue;
+
+        switch (actions[selected]) {
+        case ACTION_START:
+            m_config.onStart(*this);
+            break;
+        case ACTION_FILES:
+            OpenFileSelector();
+            break;
+        case ACTION_SETTINGS:
+            OpenSettings();
+            break;
+        case ACTION_QUIT:
+            Close();
+            break;
+        default:
+            break;
+        }
+    }
+
+    screen.End();
+    return true;
+}
+
+bool Application::RunFramebufferFileSelector() {
+    Entry *entries = static_cast<Entry *>(
+        malloc(sizeof(Entry) * MAX_ENTRIES));
+    if (!entries) {
+        ReturnToMenu();
+        return false;
+    }
+
+    Framebuffer screen;
+    if (!screen.Begin()) {
+        free(entries);
+        ReturnToMenu();
+        return false;
+    }
+
+    int count = 0;
+    int selected = 0;
+    bool done = false;
+
+    screen.Clear(Colors::White);
+    screen.DrawText(8, 12, "Scanning files...", Colors::Blue);
+    screen.Present();
+    Scan(m_currentDirectory, m_config, entries, &count);
+
+    while (!done && m_state == StateFileSelector) {
+        int pages = (count + ROWS - 1) / ROWS;
+        if (pages < 1)
+            pages = 1;
+        if (selected < 0)
+            selected = 0;
+        if (selected >= count && count > 0)
+            selected = count - 1;
+        int page = selected / ROWS;
+        if (page >= pages)
+            page = pages - 1;
+        const int first = page * ROWS;
+        int visible = count - first;
+        if (visible > ROWS)
+            visible = ROWS;
+
+        screen.Clear(Colors::White);
+        screen.FillRect(0, 0, screen.Width(), 32, Colors::Black);
+        screen.DrawText(8, 10, "Select file", Colors::White);
+        screen.DrawText(8, 40, m_currentDirectory, Colors::Blue);
+        screen.DrawLine(8, 54, screen.Width() - 8, 54, Colors::Gray);
+
+        const int rowTop = 64;
+        const int rowHeight = 32;
+        for (int row = 0; row < visible; ++row) {
+            const int index = first + row;
+            const int y = rowTop + row * rowHeight;
+            char label[NAME_LEN + 4];
+            if (entries[index].dir) {
+                Copy(label, "[D] ", sizeof(label));
+                Append(label, entries[index].name, sizeof(label));
+                Append(label, "/", sizeof(label));
+            } else {
+                Copy(label, "    ", sizeof(label));
+                Append(label, entries[index].name, sizeof(label));
+            }
+
+            if (index == selected) {
+                screen.FillRect(8, y, screen.Width() - 16,
+                                rowHeight - 2, Colors::Blue);
+                screen.DrawText(14, y + 10, label, Colors::White);
+            } else {
+                screen.DrawRect(8, y, screen.Width() - 16,
+                                rowHeight - 2, Colors::Gray);
+                screen.DrawText(14, y + 10, label, Colors::Black);
+            }
+        }
+        if (count == 0)
+            screen.DrawText(12, rowTop + 8, "No matching entries",
+                            Colors::Gray);
+
+        const int footerY = screen.Height() - 36;
+        const int buttonWidth = screen.Width() / 4;
+        const char *footer[4] = {"<", ">", "Up", "Back"};
+        for (int i = 0; i < 4; ++i) {
+            const int x = i * buttonWidth;
+            screen.DrawRect(x + 2, footerY, buttonWidth - 4, 28,
+                            Colors::Gray);
+            screen.DrawText(x + 8, footerY + 10, footer[i], Colors::Black);
+        }
+        screen.Present();
+
+        bool activate = false;
+        bool goParent = false;
+        int footerAction = -1;
+        UI::Event event;
+        while (m_state == StateFileSelector && !activate &&
+               !goParent && footerAction < 0) {
+            const int result = Input::Poll(&event);
+            if (result < 0) {
+                ReturnToMenu();
+                break;
+            }
+            if (result == 0)
+                continue;
+
+            if (event.type == EventSystem &&
+                event.systemEvent == SystemActionBarEscape) {
+                ReturnToMenu();
+                break;
+            }
+            if (event.type == EventKey &&
+                event.keyAction == KeyPressed) {
+                if (event.keyCode == KeyUp) {
+                    if (count > 0 && selected > 0)
+                        --selected;
+                    break;
+                }
+                if (event.keyCode == KeyDown) {
+                    if (count > 0 && selected + 1 < count)
+                        ++selected;
+                    break;
+                }
+                if (event.keyCode == KeyLeft) {
+                    if (page > 0)
+                        selected = (page - 1) * ROWS;
+                    break;
+                }
+                if (event.keyCode == KeyRight) {
+                    if ((page + 1) * ROWS < count)
+                        selected = (page + 1) * ROWS;
+                    break;
+                }
+                if (event.keyCode == KeyBackspace) {
+                    goParent = true;
+                    break;
+                }
+                if (event.keyCode == KeyEXE) {
+                    activate = count > 0;
+                    break;
+                }
+                if (event.keyCode == KeyPowerClear) {
+                    ReturnToMenu();
+                    break;
+                }
+            } else if (event.type == EventTouch &&
+                       event.touchAction == TouchDown) {
+                const int y = event.y;
+                if (y >= rowTop && y < rowTop + ROWS * rowHeight) {
+                    const int row = (y - rowTop) / rowHeight;
+                    const int index = first + row;
+                    if (row < visible && index < count) {
+                        selected = index;
+                        activate = true;
+                    }
+                } else if (y >= footerY) {
+                    const int action = event.x / buttonWidth;
+                    if (action >= 0 && action < 4)
+                        footerAction = action;
+                }
+                break;
+            }
+        }
+
+        if (m_state != StateFileSelector)
+            break;
+
+        if (footerAction == 0) {
+            if (page > 0)
+                selected = (page - 1) * ROWS;
+        } else if (footerAction == 1) {
+            if ((page + 1) * ROWS < count)
+                selected = (page + 1) * ROWS;
+        } else if (footerAction == 2) {
+            goParent = true;
+        } else if (footerAction == 3) {
+            ReturnToMenu();
+            done = true;
+        }
+
+        if (goParent) {
+            Parent(m_currentDirectory);
+            screen.Clear(Colors::White);
+            screen.DrawText(8, 12, "Scanning files...", Colors::Blue);
+            screen.Present();
+            Scan(m_currentDirectory, m_config, entries, &count);
+            selected = 0;
+            continue;
+        }
+
+        if (activate && count > 0 && selected < count) {
+            if (entries[selected].dir) {
+                char next[PATH_LEN];
+                Join(m_currentDirectory, entries[selected].name,
+                     next, sizeof(next));
+                Copy(m_currentDirectory, next,
+                     sizeof(m_currentDirectory));
+                Append(m_currentDirectory, "\\\\",
+                       sizeof(m_currentDirectory));
+                screen.Clear(Colors::White);
+                screen.DrawText(8, 12, "Scanning files...", Colors::Blue);
+                screen.Present();
+                Scan(m_currentDirectory, m_config, entries, &count);
+                selected = 0;
+            } else {
+                char selectedPath[PATH_LEN];
+                Join(m_currentDirectory, entries[selected].name,
+                     selectedPath, sizeof(selectedPath));
+                screen.End();
+                SelectFile(selectedPath);
+                done = true;
+            }
+        }
+    }
+
+    screen.End();
+    free(entries);
+    return true;
+}
+
+bool Application::RunFramebufferSettings() {
+    if (m_config.onSettings &&
+        (!m_config.settings || m_config.settingCount <= 0)) {
+        m_config.onSettings(*this);
+        if (m_state == StateSettings)
+            ReturnToMenu();
+        return true;
+    }
+    if (m_state != StateSettings)
+        return true;
+    if (!m_config.settings || m_config.settingCount <= 0) {
+        ReturnToMenu();
+        return true;
+    }
+
+    Framebuffer screen;
+    if (!screen.Begin()) {
+        ReturnToMenu();
+        return false;
+    }
+
+    int selected = 0;
+    bool done = false;
+    while (!done && m_state == StateSettings) {
+        int pages = (m_config.settingCount + ROWS - 1) / ROWS;
+        if (pages < 1)
+            pages = 1;
+        if (selected < 0)
+            selected = 0;
+        if (selected >= m_config.settingCount)
+            selected = m_config.settingCount - 1;
+        const int page = selected / ROWS;
+        const int first = page * ROWS;
+        int visible = m_config.settingCount - first;
+        if (visible > ROWS)
+            visible = ROWS;
+
+        screen.Clear(Colors::White);
+        screen.FillRect(0, 0, screen.Width(), 32, Colors::Black);
+        screen.DrawText(8, 10, "Settings", Colors::White);
+        screen.DrawLine(8, 42, screen.Width() - 8, 42, Colors::Gray);
+
+        const int rowTop = 50;
+        const int rowHeight = 34;
+        for (int row = 0; row < visible; ++row) {
+            const int index = first + row;
+            const Setting &setting = m_config.settings[index];
+            char label[96];
+            char value[32];
+            Copy(label, setting.name ? setting.name : "Setting",
+                 sizeof(label));
+            Append(label, ": ", sizeof(label));
+            Value(setting, value, sizeof(value));
+            Append(label, value, sizeof(label));
+
+            const int y = rowTop + row * rowHeight;
+            if (index == selected) {
+                screen.FillRect(8, y, screen.Width() - 16,
+                                rowHeight - 2, Colors::Blue);
+                screen.DrawText(14, y + 11, label, Colors::White);
+            } else {
+                screen.DrawRect(8, y, screen.Width() - 16,
+                                rowHeight - 2, Colors::Gray);
+                screen.DrawText(14, y + 11, label, Colors::Black);
+            }
+        }
+
+        const int footerY = screen.Height() - 34;
+        const Setting &current = m_config.settings[selected];
+        if (current.description && current.description[0])
+            screen.DrawText(8, footerY - 10, current.description, Colors::Gray);
+        const int buttonWidth = screen.Width() / 3;
+        const char *footer[3] = {"<", ">", "Back"};
+        for (int i = 0; i < 3; ++i) {
+            const int x = i * buttonWidth;
+            screen.DrawRect(x + 2, footerY, buttonWidth - 4, 26,
+                            Colors::Gray);
+            screen.DrawText(x + 8, footerY + 9, footer[i], Colors::Black);
+        }
+        screen.Present();
+
+        int footerAction = -1;
+        int adjustment = 0;
+        bool activate = false;
+        UI::Event event;
+        while (m_state == StateSettings && footerAction < 0 &&
+               adjustment == 0 && !activate) {
+            const int result = Input::Poll(&event);
+            if (result < 0) {
+                ReturnToMenu();
+                break;
+            }
+            if (result == 0)
+                continue;
+            if (event.type == EventSystem &&
+                event.systemEvent == SystemActionBarEscape) {
+                ReturnToMenu();
+                break;
+            }
+            if (event.type == EventKey &&
+                event.keyAction == KeyPressed) {
+                if (event.keyCode == KeyUp) {
+                    selected = (selected + m_config.settingCount - 1) %
+                               m_config.settingCount;
+                    break;
+                }
+                if (event.keyCode == KeyDown) {
+                    selected = (selected + 1) % m_config.settingCount;
+                    break;
+                }
+                if (event.keyCode == KeyLeft) {
+                    adjustment = -1;
+                    break;
+                }
+                if (event.keyCode == KeyRight) {
+                    adjustment = 1;
+                    break;
+                }
+                if (event.keyCode == KeyEXE) {
+                    activate = true;
+                    break;
+                }
+                if (event.keyCode == KeyPowerClear) {
+                    ReturnToMenu();
+                    break;
+                }
+            } else if (event.type == EventTouch &&
+                       event.touchAction == TouchDown) {
+                if (event.y >= rowTop &&
+                    event.y < rowTop + ROWS * rowHeight) {
+                    const int row = (event.y - rowTop) / rowHeight;
+                    if (row < visible) {
+                        selected = first + row;
+                        activate = true;
+                    }
+                } else if (event.y >= footerY) {
+                    const int action = event.x / buttonWidth;
+                    if (action >= 0 && action < 3)
+                        footerAction = action;
+                }
+                break;
+            }
+        }
+
+        if (m_state != StateSettings)
+            break;
+        if (footerAction == 0) {
+            if (page > 0)
+                selected = (page - 1) * ROWS;
+            continue;
+        }
+        if (footerAction == 1) {
+            if ((page + 1) * ROWS < m_config.settingCount)
+                selected = (page + 1) * ROWS;
+            continue;
+        }
+        if (footerAction == 2) {
+            ReturnToMenu();
+            done = true;
+            continue;
+        }
+
+        Setting &setting = m_config.settings[selected];
+        if (adjustment != 0 && setting.type != SettingAction)
+            Adjust(setting, *this, adjustment);
+        else if (activate)
+            Adjust(setting, *this, 1);
+
+        if (adjustment != 0 || activate) {
+            if (m_settingsStore.IsOpen()) {
+                m_persistenceReady = true;
+                SaveSettingsToStorage();
+            }
+            if (m_state != StateSettings)
+                done = true;
+        }
+    }
+
+    screen.End();
+    return true;
+}
+
 } // namespace UI
