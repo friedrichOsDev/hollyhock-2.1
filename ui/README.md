@@ -21,7 +21,7 @@ Link sdk/sdk.o and ui/ui.o into your application and include sdk/include and ui/
 
 ## Public APIs
 
-- ui/application.hpp — optional built-in menu, callbacks, and settings.
+- ui/application.hpp — per-menu Native, Framebuffer, or Custom renderers, callbacks, and settings.
 - ui/framebuffer.hpp — bounded RGB565 drawing directly into LCD VRAM.
 - ui/input.hpp — normalized key, touch, system, and unknown events.
 - ui/filesystem.hpp — read-only file and directory access.
@@ -39,7 +39,7 @@ The host tests use mocked SDK calls and cover path normalization, file/directory
 
 ## Display lifecycle
 
-Framebuffer requires the LCD lifecycle to be initialized. Normally create it inside an Application callback. It does not own or restore the VRAM lifecycle. The existing built-in file selector and settings remain available; set Config::showMainMenu to false to implement custom navigation.
+Framebuffer requires the LCD lifecycle to be initialized. Normally create it inside an Application callback. It does not own or restore the VRAM lifecycle. The built-in main menu, file selector, and settings each support independent Native, Framebuffer, or Custom rendering. All defaults remain Native. Set Config::showMainMenu to false to bypass the library main menu and implement custom navigation through onStart.
 
 ## Read-only boundary
 
