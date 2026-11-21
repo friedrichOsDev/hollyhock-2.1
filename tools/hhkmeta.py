@@ -47,8 +47,6 @@ def encode_value(name: str, value: str, allow_empty: bool) -> bytes:
 
 
 def decode_value(name: str, raw: bytes) -> str:
-    # Unused bytes in an edited slot are space-padded to retain its boundary.
-    raw = raw.rstrip(b" ")
     try:
         value = raw.decode("ascii")
     except UnicodeDecodeError as exc:
@@ -71,7 +69,7 @@ def parse_bin(data: bytes) -> dict:
 
     fields = {}
     cursor = 0x10
-    for name in ATTRS:
+    for index, name in enumerate(ATTRS):
         start = cursor
         nul = data.find(b"\0", start)
         if nul < 0 or nul == start:
@@ -80,16 +78,32 @@ def parse_bin(data: bytes) -> dict:
                 "expects four non-empty strings: name, description, author, version."
             )
         value = decode_value(name, data[start:nul])
-        slot_end = align(nul + 1, 4)
+
+        if index < len(ATTRS) - 1:
+            # The legacy launcher skips all zero padding before the next field.
+            # Find that next printable field start so a previously shortened
+            # value can still retain its original reserved slot capacity.
+            slot_end = nul + 1
+            while slot_end < entry_offset and data[slot_end] == 0:
+                slot_end += 1
+            if slot_end >= entry_offset:
+                raise MetadataError(f".bin {name} has no following metadata field.")
+            if slot_end & 3:
+                raise MetadataError(f".bin {name} next field is not 4-byte aligned.")
+        else:
+            # The final metadata field ends at the entry-point offset; the
+            # executable payload begins there.
+            slot_end = entry_offset
+            if slot_end <= nul or any(data[nul + 1:slot_end]):
+                raise MetadataError(".bin version padding overlaps non-zero program data.")
+
         if slot_end > len(data) or slot_end > entry_offset:
             raise MetadataError(f".bin {name} metadata overlaps the program entry point.")
-        if any(data[nul + 1:slot_end]):
-            raise MetadataError(f".bin {name} alignment padding is not zero-filled.")
         fields[name] = {"value": value, "start": start, "end": slot_end,
                         "capacity": slot_end - start}
         cursor = slot_end
-    if cursor > entry_offset:
-        raise MetadataError(".bin metadata overlaps the declared entry point.")
+    if cursor != entry_offset:
+        raise MetadataError(".bin metadata does not end at the declared entry point.")
     return {"format": "BIN", "fields": fields, "entry": entry,
             "base": base, "entry_offset": entry_offset}
 
@@ -105,11 +119,10 @@ def patch_bin(data: bytes, meta: dict, updates: dict) -> bytes:
                 f"{name}: {len(raw)} characters do not fit (maximum {capacity - 1}). "
                 "Rebuild the application with a longer metadata string to reserve more space."
             )
-        # Keep the NUL at the end of the original fixed slot so later fields
-        # retain their offset even when the new value is shorter.
-        out[info["start"]:info["end"]] = (
-            raw + b" " * (capacity - len(raw) - 1) + b"\0"
-        )
+        # The launcher treats zero bytes as the field terminator and skips
+        # zero padding until the next field. Preserve the complete slot using
+        # zero fill, so existing launcher versions display no trailing spaces.
+        out[info["start"]:info["end"]] = raw + bytes(capacity - len(raw))
     return bytes(out)
 
 
@@ -212,7 +225,8 @@ def patch_elf(data: bytes, meta: dict, updates: dict) -> bytes:
             )
         # Metadata sections are non-allocatable. Append replacement data and
         # repoint the section; executable data and all load addresses stay put.
-        payload = raw + b" " * (capacity - len(raw) - 1) + b"\0"
+        # Zero padding keeps the launcher from rendering trailing spaces.
+        payload = raw + bytes(capacity - len(raw))
         sh = shdrs[info["index"]]
         offset = align(len(out), max(1, sh[8]))
         out.extend(bytes(offset - len(out)))
