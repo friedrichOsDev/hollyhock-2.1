@@ -817,8 +817,10 @@ int Application::AdjustSetting(int index, int direction) {
         return EINVAL;
 
     Setting &setting = m_config.settings[index];
-    if (!ValidSettingDefinition(setting))
+    if (!ValidSettingDefinition(setting) || direction == 0)
         return EINVAL;
+    if (setting.type == SettingAction && direction < 0)
+        return 0;
 
     Adjust(setting, *this, direction < 0 ? -1 : 1);
     if (m_settingsStore.IsOpen()) {
