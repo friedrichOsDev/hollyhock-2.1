@@ -1,6 +1,78 @@
 # Hollyhock 2.1
-My (**friedrichOsDev**) fork of the Hollyhock 2 SDK is mainly intended to include some SDK quality-of-life features and bug fixes.
-I named it Hollyhock 2.1, even though it's not really a new version.
+
+My (**friedrichOsDev**) fork of the Hollyhock 2 SDK and launcher. This repository
+extends the original Hollyhock 2 installation with an updated launcher, an
+improved SDK, and an optional UI library.
+
+## Important: install the original Hollyhock 2 first
+
+**This repository is not a standalone firmware installer.** A compatible
+calculator must have the original **Hollyhock 2** installation in place first.
+The original firmware patching and installation procedure is still required;
+the files in this repository do not replace it.
+
+1. Read the [Compatibility](#compatibility) information in the original guide
+   below and confirm that your calculator is supported.
+2. Follow the original
+   [Hollyhock 2 installation procedure](#installation-simple) below
+   (the `Snail2021.exe` / updater procedure). Complete that installation first.
+3. Only after the original Hollyhock 2 installation works, optionally install
+   replacement or companion binaries from this fork as described next.
+
+## Optional runtime binaries from this repository
+
+Prebuilt files, when published, are available on the
+[Hollyhock 2.1 Releases page](https://github.com/friedrichOsDev/hollyhock-2.1/releases).
+They are optional add-ons to an already installed Hollyhock 2 system:
+
+- **`run.bin` — updated launcher:** copy this file to the root of the
+  calculator's `fls0` storage and replace the existing `run.bin`. Keep a
+  backup of the original file so you can restore it.
+- **`python.bin` — optional companion binary:** copy it to the same location
+  only if you want to use the Python-related functionality supplied with that
+  release. It is an additional file; it does not replace `run.bin`.
+- **Other optional binaries:** some releases may include additional helper or
+  companion files. Install only the files you need and follow the notes for
+  that particular release. Do not overwrite unrelated calculator files.
+
+You do not need to install every optional binary. The original Hollyhock 2
+installation remains the required base; the updated `run.bin` and any
+companion binaries are optional replacements/additions.
+
+**Release availability:** no prebuilt GitHub Release is published yet. The
+Releases page above is where future packaged binaries will be provided. Until
+then, the launcher can be built from source with `./launcher/build.sh`.
+
+## Development: updated SDK and UI library
+
+This repository also contains an updated Hollyhock SDK and the optional
+**Hollyhock UI Library**. These are development tools for compiling your own
+fx-CP400 applications; they are not required just to install or use the
+launcher.
+
+The `app_template/` project is the recommended starting point and already
+demonstrates how to use both the updated SDK and UI library. Its build script
+builds the SDK, builds the UI library, and then compiles the example
+application:
+
+```sh
+./app_template/build.sh
+```
+
+This produces `app_template/app_template.hhk` and
+`app_template/app_template.bin`. Copy the desired application file to the
+calculator's `fls0` root and launch it using Hollyhock.
+
+You need the SH-4 cross-toolchain used by the SDK, GNU Make, and Bash. To start
+your own project, use `app_template/` as a base, adjust its source and build
+configuration, and link the SDK and UI library as shown in its Makefile.
+
+- [UI Library guide](doc/ui-library/README.md)
+- [UI Library getting started](doc/ui-library/getting-started.md)
+- [Launcher documentation](launcher/README.md)
+- [Developing applications](doc/user/developing.md)
+
+---
 
 # Original README
 
