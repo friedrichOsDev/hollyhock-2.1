@@ -158,7 +158,21 @@ enum SettingType {
 };
 ~~~
 
-Setting::Boolean, Setting::Integer, Setting::Enumeration, and Setting::Action create entries for the built-in or custom settings screen. Integer values use their configured range and step; enumeration values wrap through their options. Action entries invoke their callback on a positive adjustment. Persistent settings store Boolean, Integer, and Enumeration values, and serialize Action entries as markers without a stored value. The serializer supports at most 32 entries and a payload smaller than 512 bytes.
+Setting::Boolean, Setting::Integer, Setting::Enumeration, and Setting::Action create entries for the built-in or custom settings screen. Each factory has its original overload and an overload that accepts a stable ID before the display name:
+
+~~~cpp
+UI::Setting::Boolean("display.showGrid", "Show grid", &showGrid);
+UI::Setting::Integer("editor.zoom", "Zoom", &zoom, 50, 200, 10);
+UI::Setting::Enumeration(
+    "editor.theme", "Theme", &theme, themeOptions, 3);
+UI::Setting::Action("cache.clear", "Clear cache", ClearCache);
+~~~
+
+The original overloads remain source-compatible. Without an explicit ID, the setting name is used as the storage key. IDs/names used as keys must be unique within the settings array and contain 1-63 printable ASCII characters. Keys are case-sensitive.
+
+Integer values use their configured range and step; enumeration values wrap through their options. Action entries invoke their callback on a positive adjustment. Persistent settings store Boolean, Integer, and Enumeration values, and serialize Action entries as markers without a stored value. The UIST2 serializer supports at most 32 entries and a payload smaller than 512 bytes. It matches values by key rather than array order, ignores removed keys, and leaves newly added settings at their defaults.
+
+The previous UIST1 positional format remains readable and is upgraded to UIST2 after a successful load. Since UIST1 contains no IDs, its one-time migration must match entries by the current array order.
 
 ## PersistentStore
 
