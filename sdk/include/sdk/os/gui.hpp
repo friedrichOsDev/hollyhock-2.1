@@ -22,13 +22,14 @@
  */
 
 #pragma once
-#include "gui/button.hpp"
-#include "gui/dialog.hpp"
-#include "gui/dropDown.hpp"
-#include "gui/label.hpp"
-#include "gui/longLabel.hpp"
-#include "gui/radioButton.hpp"
-#include "gui/textBox.hpp"
+
+#include "gui/button.hpp" // IWYU pragma: export
+#include "gui/dialog.hpp" // IWYU pragma: export
+#include "gui/dropDown.hpp" // IWYU pragma: export
+#include "gui/label.hpp" // IWYU pragma: export
+#include "gui/longLabel.hpp" // IWYU pragma: export
+#include "gui/radioButton.hpp" // IWYU pragma: export
+#include "gui/textBox.hpp" // IWYU pragma: export
 
 const int BUTTON_OK = 1 << 5;
 const int BUTTON_YES = 1 << 6;
