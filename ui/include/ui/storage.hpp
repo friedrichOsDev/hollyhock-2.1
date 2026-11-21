@@ -21,12 +21,13 @@ public:
     bool IsOpen() const;
     const char *Folder() const;
 
-    // Copies a variable into caller-owned memory.
-    // Returns the SDK result; actualSize receives the stored byte count.
+    // Copies a variable into caller-owned memory. actualSize reports the
+    // stored size, including the MCS-required 4-byte alignment padding.
     int Load(const char *name, uint8_t *type, void *buffer,
              uint32_t capacity, uint32_t *actualSize) const;
 
-    // Creates or replaces a variable in the opened folder.
+    // Creates or replaces a variable. Data is copied to an aligned buffer
+    // and padded with zero bytes to a multiple of four before the MCS call.
     int Save(const char *name, uint8_t type,
              const void *data, uint32_t size);
 
