@@ -21,6 +21,11 @@ try:
 except ImportError:  # Keep --help usable when NumPy is not installed.
     np = None
 
+try:
+    import lz4.block as lz4_block
+except ImportError:
+    lz4_block = None
+
 
 MAGIC = b"CPV\0"
 VERSION_MAJOR = 1
@@ -36,6 +41,8 @@ MAX_WIDTH = 528
 MAX_HEIGHT = 320
 MAX_FPS = 30
 MAX_RUN_LENGTH = 8191
+MAX_DELTA_MASK_LENGTH = 65535
+FRAME_FLAG_LZ4 = 0x01
 
 FRAME_I = 0
 FRAME_P = 1
@@ -44,8 +51,9 @@ OP_INDEX_LITERAL = 0
 OP_INDEX_REPEAT = 1
 OP_SKIP = 2
 OP_RAW565 = 3
+OP_DELTA_MASK = 4  # Accounting category; on disk this is an extended SKIP packet.
 
-OP_NAMES = ("INDEX_LITERAL", "INDEX_REPEAT", "SKIP", "RAW565")
+OP_NAMES = ("INDEX_LITERAL", "INDEX_REPEAT", "SKIP", "RAW565", "DELTA_MASK")
 
 
 class ConversionError(RuntimeError):
@@ -59,11 +67,16 @@ class PacketStats:
 
     @classmethod
     def create(cls) -> "PacketStats":
-        return cls([0, 0, 0, 0], [0, 0, 0, 0])
+        return cls([0] * len(OP_NAMES), [0] * len(OP_NAMES))
 
     def add(self, opcode: int, byte_count: int) -> None:
         self.counts[opcode] += 1
         self.sizes[opcode] += byte_count
+
+    def merge(self, other: "PacketStats") -> None:
+        for index in range(len(OP_NAMES)):
+            self.counts[index] += other.counts[index]
+            self.sizes[index] += other.sizes[index]
 
 
 def require_numpy() -> None:
@@ -71,6 +84,15 @@ def require_numpy() -> None:
         raise ConversionError(
             "NumPy is required for the fast encoder. On Arch/CachyOS install it with "
             "'sudo pacman -S python-numpy', or use 'python -m pip install numpy'."
+        )
+
+
+def require_lz4() -> None:
+    if lz4_block is None:
+        raise ConversionError(
+            "LZ4 compression is enabled but python-lz4 is not installed. "
+            "On Arch/CachyOS install it with 'sudo pacman -S python-lz4', "
+            "or use 'python -m pip install lz4'. Pass --no-lz4 to disable it."
         )
 
 
@@ -282,11 +304,46 @@ def packet_header_size(run_length: int) -> int:
     return 1 if run_length <= 32 else 2
 
 
-def literal_cost(length: int) -> int:
+def bits_per_index(palette_count: int) -> int:
+    if not (1 <= palette_count <= 256):
+        raise ValueError("palette_count must be in the range 1..256")
+    return max(1, (palette_count - 1).bit_length())
+
+
+def pack_palette_indices(values, bit_width: int) -> bytes:
+    """Pack indices LSB-first, with each packet independently byte-aligned."""
+    values = np.asarray(values, dtype=np.uint8)
+    if values.size == 0:
+        return b""
+    if not (1 <= bit_width <= 8):
+        raise ValueError("palette index bit width must be in the range 1..8")
+    if bit_width == 8:
+        return values.tobytes()
+    bit_shifts = np.arange(bit_width, dtype=np.uint8)
+    bits = ((values[:, None] >> bit_shifts) & 1).astype(np.uint8, copy=False)
+    return np.packbits(bits.reshape(-1), bitorder="little").tobytes()
+
+
+def packet_header(opcode: int, run_length: int) -> bytes:
+    if opcode not in (OP_INDEX_LITERAL, OP_INDEX_REPEAT, OP_SKIP, OP_RAW565):
+        raise ValueError("invalid CPV packet opcode")
+    if not (1 <= run_length <= MAX_RUN_LENGTH):
+        raise ValueError("CPV packet run length is outside 1..8191")
+    if run_length <= 32:
+        return bytes(((opcode << 6) | (run_length - 1),))
+    first = (opcode << 6) | 0x20 | ((run_length >> 8) & 0x1F)
+    return bytes((first, run_length & 0xFF))
+
+
+def packet_header_size(run_length: int) -> int:
+    return 1 if run_length <= 32 else 2
+
+
+def literal_cost(length: int, bit_width: int) -> int:
     total = 0
     while length:
         part = min(length, MAX_RUN_LENGTH)
-        total += packet_header_size(part) + part
+        total += packet_header_size(part) + (part * bit_width + 7) // 8
         length -= part
     return total
 
@@ -299,14 +356,14 @@ def repeat_cost(length: int) -> int:
     return total
 
 
-def emit_literal(out: bytearray, values, stats: PacketStats) -> None:
+def emit_literal(out: bytearray, values, stats: PacketStats, bit_width: int) -> None:
     start = 0
     length = int(values.size)
     while start < length:
         count = min(MAX_RUN_LENGTH, length - start)
         packet_start = len(out)
         out.extend(packet_header(OP_INDEX_LITERAL, count))
-        out.extend(values[start:start + count].tobytes())
+        out.extend(pack_palette_indices(values[start:start + count], bit_width))
         stats.add(OP_INDEX_LITERAL, len(out) - packet_start)
         start += count
 
@@ -324,12 +381,11 @@ def emit_repeat(out: bytearray, value: int, length: int, stats: PacketStats) -> 
 
 def emit_repeat_batch(out: bytearray, values, run_starts, run_lengths,
                       stats: PacketStats) -> None:
-    """Emit many repeat packets in one NumPy operation, preserving run order."""
+    """Emit repeat packets in one vectorised operation, preserving run order."""
     lengths = np.asarray(run_lengths, dtype=np.int64)
     starts = np.asarray(run_starts, dtype=np.int64)
     repeated_values = values[starts]
 
-    # Oversized runs are rare at <=528x320. Split these few runs explicitly.
     if np.any(lengths > MAX_RUN_LENGTH):
         for value, length in zip(repeated_values, lengths):
             emit_repeat(out, int(value), int(length), stats)
@@ -349,8 +405,7 @@ def emit_repeat_batch(out: bytearray, values, run_starts, run_lengths,
 
     encoded = packets[keep].tobytes()
     out.extend(encoded)
-    count = int(lengths.size)
-    stats.counts[OP_INDEX_REPEAT] += count
+    stats.counts[OP_INDEX_REPEAT] += int(lengths.size)
     stats.sizes[OP_INDEX_REPEAT] += len(encoded)
 
 
@@ -376,8 +431,9 @@ def emit_raw(out: bytearray, values, stats: PacketStats) -> None:
         start += count
 
 
-def encode_palette_segment(values, out: bytearray, stats: PacketStats) -> None:
-    """Choose between one/more literal packets and repeat packets plus literals."""
+def encode_palette_segment(values, out: bytearray, stats: PacketStats,
+                           bit_width: int) -> None:
+    """Choose a compact mix of bit-packed literal and byte-index repeat packets."""
     length = int(values.size)
     if length == 0:
         return
@@ -389,16 +445,11 @@ def encode_palette_segment(values, out: bytearray, stats: PacketStats) -> None:
     boundaries[-1] = length
 
     run_lengths = np.diff(boundaries)
-    # Short runs save little once packet headers are counted; keep them in
-    # literals to reduce packet count and encoder work.
     repeated = run_lengths >= 4
-
     if not np.any(repeated):
-        emit_literal(out, values, stats)
+        emit_literal(out, values, stats, bit_width)
         return
 
-    # Cost of a plan that uses INDEX_REPEAT for repeated runs and groups
-    # adjacent singleton runs into INDEX_LITERAL packets.
     group_changes = np.flatnonzero(repeated[1:] != repeated[:-1]) + 1
     group_boundaries = np.empty(group_changes.size + 2, dtype=np.int64)
     group_boundaries[0] = 0
@@ -420,19 +471,17 @@ def encode_palette_segment(values, out: bytearray, stats: PacketStats) -> None:
         after_run = int(group_boundaries[group + 1])
         if not repeated[first_run]:
             pixel_length = int(boundaries[after_run] - boundaries[first_run])
-            run_plan_cost += literal_cost(pixel_length)
+            run_plan_cost += literal_cost(pixel_length, bit_width)
 
-    all_literal_cost = literal_cost(length)
+    all_literal_cost = literal_cost(length, bit_width)
     group_count = group_boundaries.size - 1
-    # On highly fragmented patterns, a literal stream is faster to encode and
-    # decode than thousands of tiny alternating packet groups.
     if group_count > 256:
-        emit_literal(out, values, stats)
+        emit_literal(out, values, stats, bit_width)
         return
 
-    saving_threshold = max(4, all_literal_cost // 100)
+    saving_threshold = max(3, all_literal_cost // 100)
     if run_plan_cost + saving_threshold >= all_literal_cost:
-        emit_literal(out, values, stats)
+        emit_literal(out, values, stats, bit_width)
         return
 
     for group in range(group_count):
@@ -449,24 +498,83 @@ def encode_palette_segment(values, out: bytearray, stats: PacketStats) -> None:
                 stats,
             )
         else:
-            emit_literal(out, values[pixel_start:pixel_end], stats)
+            emit_literal(out, values[pixel_start:pixel_end], stats, bit_width)
 
 
-def encode_frame_payload(indices, reconstructed, raw_mask, previous, frame_type: int):
-    """Encode a complete I/P frame using linear status runs and packet payloads."""
+def encode_normal_delta_chunk(indices, reconstructed, previous, out: bytearray,
+                              stats: PacketStats, bit_width: int) -> None:
+    changed = reconstructed != previous
+    transitions = np.flatnonzero(changed[1:] != changed[:-1]) + 1
+    boundaries = np.empty(transitions.size + 2, dtype=np.int64)
+    boundaries[0] = 0
+    boundaries[1:-1] = transitions
+    boundaries[-1] = int(changed.size)
+
+    for segment in range(boundaries.size - 1):
+        start = int(boundaries[segment])
+        end = int(boundaries[segment + 1])
+        if bool(changed[start]):
+            encode_palette_segment(indices[start:end], out, stats, bit_width)
+        else:
+            emit_skip(out, end - start, stats)
+
+
+def encode_palette_delta_segment(indices, reconstructed, previous,
+                                 out: bytearray, stats: PacketStats,
+                                 bit_width: int, use_delta_mask: bool) -> None:
+    """Use a mixed delta mask only when it beats ordinary SKIP + data packets."""
+    length = int(indices.size)
+    chunk_start = 0
+    while chunk_start < length:
+        chunk_length = min(MAX_DELTA_MASK_LENGTH, length - chunk_start)
+        chunk_end = chunk_start + chunk_length
+        chunk_indices = indices[chunk_start:chunk_end]
+        chunk_reconstructed = reconstructed[chunk_start:chunk_end]
+        chunk_previous = previous[chunk_start:chunk_end]
+        changed = chunk_reconstructed != chunk_previous
+
+        normal = bytearray()
+        normal_stats = PacketStats.create()
+        encode_normal_delta_chunk(
+            chunk_indices, chunk_reconstructed, chunk_previous,
+            normal, normal_stats, bit_width,
+        )
+
+        changed_count = int(np.count_nonzero(changed))
+        if use_delta_mask and 0 < changed_count < chunk_length:
+            mask_bytes = np.packbits(changed, bitorder="little").tobytes()
+            packed_indices = pack_palette_indices(chunk_indices[changed], bit_width)
+            candidate = (
+                bytes((0xA0, 0x00))
+                + struct.pack("<H", chunk_length)
+                + mask_bytes
+                + packed_indices
+            )
+            if len(candidate) < len(normal):
+                out.extend(candidate)
+                stats.add(OP_DELTA_MASK, len(candidate))
+            else:
+                out.extend(normal)
+                stats.merge(normal_stats)
+        else:
+            out.extend(normal)
+            stats.merge(normal_stats)
+        chunk_start = chunk_end
+
+
+def encode_frame_payload(indices, reconstructed, raw_mask, previous,
+                         frame_type: int, bit_width: int, use_delta_mask: bool):
+    """Encode I/P frames; raw quality escapes are isolated from delta-mask spans."""
     pixel_count = int(reconstructed.size)
-    status = np.zeros(pixel_count, dtype=np.uint8)  # 0 palette, 1 raw, 2 skip
-    if np.any(raw_mask):
-        status[raw_mask] = 1
-    if frame_type == FRAME_P:
-        unchanged = reconstructed == previous
-        status[unchanged] = 2
-        status[(~unchanged) & raw_mask] = 1
-        status[(~unchanged) & (~raw_mask)] = 0
-    elif frame_type != FRAME_I:
+    if frame_type == FRAME_I:
+        raw_positions = raw_mask
+    elif frame_type == FRAME_P:
+        changed = reconstructed != previous
+        raw_positions = raw_mask & changed
+    else:
         raise ValueError("invalid CPV frame type")
 
-    transitions = np.flatnonzero(status[1:] != status[:-1]) + 1
+    transitions = np.flatnonzero(raw_positions[1:] != raw_positions[:-1]) + 1
     boundaries = np.empty(transitions.size + 2, dtype=np.int64)
     boundaries[0] = 0
     boundaries[1:-1] = transitions
@@ -477,17 +585,40 @@ def encode_frame_payload(indices, reconstructed, raw_mask, previous, frame_type:
     for segment in range(boundaries.size - 1):
         start = int(boundaries[segment])
         end = int(boundaries[segment + 1])
-        kind = int(status[start])
-        if kind == 2:
-            emit_skip(payload, end - start, stats)
-        elif kind == 1:
+        if bool(raw_positions[start]):
             emit_raw(payload, reconstructed[start:end], stats)
+        elif frame_type == FRAME_P:
+            encode_palette_delta_segment(
+                indices[start:end],
+                reconstructed[start:end],
+                previous[start:end],
+                payload,
+                stats,
+                bit_width,
+                use_delta_mask,
+            )
         else:
-            encode_palette_segment(indices[start:end], payload, stats)
+            encode_palette_segment(indices[start:end], payload, stats, bit_width)
 
-    if frame_type == FRAME_I and stats.counts[OP_SKIP]:
-        raise AssertionError("encoder generated SKIP in an I-frame")
+    if frame_type == FRAME_I and (stats.counts[OP_SKIP] or stats.counts[OP_DELTA_MASK]):
+        raise AssertionError("encoder generated a delta packet in an I-frame")
     return bytes(payload), stats
+
+
+def compress_frame_payload(payload: bytes, enabled: bool) -> tuple[bytes, int, int]:
+    """Compress one independent frame packet stream with a raw LZ4 block."""
+    if not enabled:
+        return payload, 0, 0
+    require_lz4()
+    compressed = lz4_block.compress(
+        payload, mode="fast", acceleration=1, store_size=False
+    )
+    stored = struct.pack("<I", len(payload)) + compressed
+    saving = len(payload) - len(stored)
+    minimum_saving = max(16, len(payload) // 100)
+    if saving < minimum_saving:
+        return payload, 0, 0
+    return stored, FRAME_FLAG_LZ4, saving
 
 
 def read_exact(stream: BinaryIO, size: int) -> Optional[bytes]:
@@ -517,24 +648,28 @@ def write_frame_record(
     frame_type: int,
     frame_number: int,
     duration_ms: int,
+    flags: int,
 ) -> int:
     if not (1 <= duration_ms <= 0xFFFFFFFF):
         raise ConversionError("frame duration must fit in a non-zero uint32")
+    if flags & ~FRAME_FLAG_LZ4:
+        raise ConversionError("attempted to write unknown frame flags")
     if len(payload) > 0xFFFFFFFF:
         raise ConversionError("frame payload exceeds the CPV uint32 limit")
     offset = output.tell()
     if offset > 0xFFFFFFFF or len(payload) + FRAME_HEADER.size > 0xFFFFFFFF - offset:
         raise ConversionError("output exceeds the CPV v1 4 GiB file-offset limit")
     output.write(FRAME_HEADER.pack(
-        b"FRM1", frame_type, 0, FRAME_HEADER.size,
+        b"FRM1", frame_type, flags, FRAME_HEADER.size,
         frame_number, duration_ms, len(payload),
     ))
     output.write(payload)
     return offset
 
-
 def convert(args: argparse.Namespace) -> None:
     require_numpy()
+    if not args.no_lz4:
+        require_lz4()
     source = Path(args.input).expanduser().resolve()
     output_path = Path(args.output).expanduser().resolve()
     if not source.is_file():
@@ -567,6 +702,8 @@ def convert(args: argparse.Namespace) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     conversion_started = time.monotonic()
     total_packet_stats = PacketStats.create()
+    total_compressed_frames = 0
+    total_lz4_savings = 0
     index_entries: list[tuple[int, int, int]] = []
     process: Optional[subprocess.Popen[bytes]] = None
     stderr_file = tempfile.TemporaryFile(mode="w+b")
@@ -661,16 +798,27 @@ def convert(args: argparse.Namespace) -> None:
                             raw_mask,
                             previous_reconstruction,
                             frame_type,
+                            bits_per_index(int(palette.size)),
+                            not args.no_delta_mask,
                         )
+                        stored_payload, frame_flags, frame_saving = compress_frame_payload(
+                            payload, not args.no_lz4
+                        )
+                        if frame_flags & FRAME_FLAG_LZ4:
+                            total_compressed_frames += 1
+                            total_lz4_savings += frame_saving
                         frame_offset = write_frame_record(
-                            output, payload, frame_type, stored_frame_count, duration_ms
+                            output,
+                            stored_payload,
+                            frame_type,
+                            stored_frame_count,
+                            duration_ms,
+                            frame_flags,
                         )
                         if frame_type == FRAME_I:
                             index_entries.append((stored_frame_count, start_ms, frame_offset))
                             last_keyframe_start_ms = start_ms
-                        for opcode in range(4):
-                            total_packet_stats.counts[opcode] += frame_stats.counts[opcode]
-                            total_packet_stats.sizes[opcode] += frame_stats.sizes[opcode]
+                        total_packet_stats.merge(frame_stats)
                         stored_frame_count += 1
                         last_frame_offset = frame_offset
                         last_frame_duration = duration_ms
@@ -772,6 +920,9 @@ def convert(args: argparse.Namespace) -> None:
             f"  Duration: {seconds:.3f} s\n"
             f"  Palette: {palette.size} colours\n"
             f"  Quality: {args.quality}/100\n"
+            f"  Palette index width: {bits_per_index(int(palette.size))} bits\n"
+            f"  LZ4-compressed frames: {total_compressed_frames}/{stored_frame_count}\n"
+            f"  LZ4 bytes saved: {total_lz4_savings:,}\n"
             f"  File size: {size:,} bytes ({size / (1024 * 1024):.2f} MiB)\n"
             f"  Conversion time: {elapsed_wall:.2f} s\n"
             f"  Conversion speed: {seconds / elapsed_wall:.2f}× realtime\n"
@@ -779,7 +930,7 @@ def convert(args: argparse.Namespace) -> None:
             + ", ".join(
                 f"{OP_NAMES[i]}={total_packet_stats.counts[i]} "
                 f"({total_packet_stats.sizes[i]:,} bytes)"
-                for i in range(4)
+                for i in range(len(OP_NAMES))
             )
         )
     finally:
@@ -809,6 +960,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--quality", type=int, choices=range(0, 101), default=75,
         help="global palette quality: 0 (16 colours) to 100 (RGB565-preserving RAW fallback; default: 75)",
+    )
+    parser.add_argument(
+        "--no-delta-mask", action="store_true",
+        help="disable mixed SKIP/data delta-mask packets (useful for size comparisons)",
+    )
+    parser.add_argument(
+        "--no-lz4", action="store_true",
+        help="disable per-frame LZ4 block compression (useful for size comparisons)",
     )
     parser.add_argument(
         "--keyframe-interval", type=float, default=2.0,
