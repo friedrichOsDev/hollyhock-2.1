@@ -100,11 +100,13 @@ The built-in framebuffer main menu supports UP/DOWN, EXE, and touch. The framebu
 
 ## Custom file selector API
 
-A custom file selector can reuse the application's current directory and report a selected path through the central selection method:
+A custom file selector can reuse the application's current directory and configured extension filters, then report a selected path through the central selection method:
 
 ~~~cpp
 static void CustomFiles(UI::Application &app) {
     // Draw entries from app.CurrentDirectory() using Directory and Framebuffer.
+    // Keep directories visible and filter regular files:
+    // app.FileMatchesFilter(entry.name)
     // On directory navigation:
     app.SetCurrentDirectory("fls0/folder/");
     // When the user chooses a file:
@@ -118,7 +120,7 @@ config.fileSelectorRenderer = UI::MenuRenderer::Custom;
 config.onCustomFileSelector = CustomFiles;
 ~~~
 
-`CurrentDirectory()` returns the current selector path. `SetCurrentDirectory()` normalizes and stores a path and ensures it ends in a backslash; it does not test whether the directory exists. `SelectFile()` is valid while the application is in the file-selector state. It returns zero on success or a negative error code for an invalid state or path. The selected path passed to `onFileSelected` is valid for the duration of that callback.
+`CurrentDirectory()` returns the current selector path. `SetCurrentDirectory()` normalizes and stores a path and ensures it ends in a backslash; it does not test whether the directory exists. `FileMatchesFilter()` applies the filters from Config to a file name; custom browsers should still show directories regardless of the filter. `SelectFile()` is valid while the application is in the file-selector state. It returns zero on success or a negative error code for an invalid state or path. The selected path passed to `onFileSelected` is valid for the duration of that callback.
 
 ## Callbacks
 
@@ -155,6 +157,17 @@ The path is valid for the duration of the callback. A custom file browser can co
 | OpenSettings() | Opens the built-in settings screen when enabled. |
 | IsRunning() const | Returns false after exit is selected. |
 | SettingsPersistenceResult() const | Returns 0 on success or latest MCS persistence error. |
+
+## Custom settings access
+
+A custom settings callback can retrieve the same Setting array used by the built-in renderer:
+
+~~~cpp
+Setting *settings = app.GetSettings();
+int count = app.GetSettingCount();
+~~~
+
+The Setting objects contain the application-owned value pointers, option arrays, descriptions, and action callbacks. Use `app.AdjustSetting(index, direction)` to apply the library's Boolean/Integer/Enumeration/Action behavior and save persistent settings immediately. A negative direction steps backward; a positive direction steps forward. Direct value changes are also saved when the custom settings callback returns.
 
 ## Built-in settings
 
