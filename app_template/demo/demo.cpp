@@ -178,7 +178,7 @@ void DrawFooter(UI::Framebuffer &screen, const char *text) {
     screen.Present();
 }
 
-bool WaitForDismiss(UI::Framebuffer &screen) {
+bool WaitForDismiss() {
     while (true) {
         UI::Event event;
         const int result = UI::Input::Poll(&event);
@@ -251,7 +251,7 @@ void ShowStorageDiagnostics() {
     screen.DrawText(12, 194, "The library does not modify files.",
                     UI::Colors::Black);
     DrawFooter(screen, "EXE / touch / BACK: return");
-    WaitForDismiss(screen);
+    WaitForDismiss();
     screen.End();
 }
 
@@ -345,7 +345,7 @@ void ShowDrawingShowcase() {
                     UI::Colors::Blue);
 
     DrawFooter(screen, "EXE / touch / BACK: return");
-    WaitForDismiss(screen);
+    WaitForDismiss();
     screen.End();
 }
 
@@ -609,7 +609,7 @@ void DemoFileSelected(UI::Application &app, const char *path) {
     }
 
     DrawFooter(screen, "EXE / touch / BACK: return to menu");
-    WaitForDismiss(screen);
+    WaitForDismiss();
     screen.End();
 }
 
