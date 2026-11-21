@@ -2,6 +2,7 @@
 #include <ui/filesystem.hpp>
 #include <sdk/os/gui.hpp>
 #include <ui/framebuffer.hpp>
+#include <ui/input.hpp>
 #include <sdk/os/mem.hpp>
 #include <stddef.h>
 #include <stdint.h>
@@ -819,7 +820,8 @@ void Application::RunNativeMainMenu() {
                m_config.filesLabel ? m_config.filesLabel : "Files", E_FILES);
     }
     if (m_config.showSettings &&
-        (m_config.settingCount > 0 || m_config.onSettings)) {
+        (m_config.settingCount > 0 || m_config.onSettings ||
+         m_config.onCustomSettings)) {
         Button(elements, dialog, row++,
                m_config.settingsLabel ? m_config.settingsLabel : "Settings",
                E_SETTINGS);
