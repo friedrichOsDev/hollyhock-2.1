@@ -128,7 +128,7 @@ void BuildPreview(const char *source, int length, int format,
     for (int index = 0; index < length && position < capacity - 1; ++index) {
         if (format == 1) {
             if (column == 16) {
-                output[position++] = '\\n';
+                output[position++] = '\n';
                 column = 0;
             } else if (column > 0) {
                 output[position++] = ' ';
@@ -142,7 +142,7 @@ void BuildPreview(const char *source, int length, int format,
             ++column;
         } else {
             if (column == 48) {
-                output[position++] = '\\n';
+                output[position++] = '\n';
                 column = 0;
             }
             const unsigned char value =
