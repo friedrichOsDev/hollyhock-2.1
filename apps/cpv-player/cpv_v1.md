@@ -7,95 +7,115 @@
 **Primary playback target:** 528 × 320 pixels at 10 frames per second  
 **Maximum frame dimensions:** 528 × 320 pixels  
 **Maximum nominal frame rate:** 30 FPS  
-**Pixel storage:** RGB565  
+**Pixel format:** RGB565  
 **Byte order:** Little-endian  
 **Audio:** Not supported
 
 ---
 
-## 1. Purpose and design principles
+## 1. Purpose
 
-CPV is a compact video container and codec intended for reliable software decoding on the Casio fx-CP400. The desktop encoder may perform comparatively expensive analysis, but the calculator decoder must remain small, deterministic, and fast.
+CPV is a compact video container and codec designed for simple, fast software decoding on the Casio fx-CP400. The desktop encoder may perform analysis and optimisation, but the calculator decoder must use only bounded integer operations, sequential file reads, palette lookups, and framebuffer writes.
 
-CPV v1 uses a **single video-wide colour palette** and a **linear, raster-ordered frame token stream**. Delta frames describe only changes relative to the image reconstructed from the preceding frame. The format deliberately avoids per-tile palettes, recursive tile trees, motion-vector search, and entropy coders.
+CPV v1 is based on a proven and deliberately simple architecture:
 
-The design is based on five principles:
+- One **global colour palette** for the complete video.
+- One linear **raster-ordered pixel stream**, not a tile tree.
+- **Delta frames** that encode only pixels that differ from the preceding reconstructed frame.
+- Run-length packets for repeated colours.
+- Literal packets for sequences containing different palette colours.
+- A direct RGB565 packet for content where palette quantisation would cause too much visual loss.
+- Periodic keyframes and a compact keyframe index for seeking.
 
-1. **A global palette:** A single palette is generated for the complete video. It avoids repeating local palette data throughout the file and lets the encoder build one reusable colour lookup table.
-2. **Linear delta coding:** Pixels are processed from left to right and top to bottom. Unchanged consecutive pixels are represented by SKIP packets.
-3. **Efficient changed-pixel coding:** Changed pixels can be stored as palette-index literals, repeated palette indices, or direct RGB565 values.
-4. **Simple decoding:** The calculator only reads packet headers, copies values, repeats values, or leaves previous pixels unchanged.
-5. **Bounded seeking:** Periodic keyframes and a keyframe index allow playback to resume without decoding the complete video from its beginning.
+The format is intended for mixed video content: animation, live-action footage, gameplay, and screen recordings. It does not assume that all content consists of flat colours or that motion occurs only in small rectangular regions.
 
-The format is suitable for mixed content: animation, live-action video, gameplay, and screen recordings. It does not assume that every frame is mostly static or that every region has a small local palette.
+### 1.1 Design priorities
 
-### 1.1 Explicit non-goals
+In order of priority:
+
+1. Small files at useful visual quality.
+2. Fast and predictable decoding on the calculator.
+3. Fast desktop conversion.
+4. Low calculator memory use.
+5. Bounded seeking time.
+6. A format that is straightforward to inspect, validate, and implement.
+
+### 1.2 What CPV v1 deliberately avoids
 
 CPV v1 does not define:
 
 - Audio, subtitles, or multiple tracks.
-- Motion compensation or motion vectors.
+- Per-tile or per-frame palettes.
+- Recursive tiles or quadtrees.
+- Motion vectors or motion compensation.
 - B-frames or bidirectional prediction.
-- YUV or chroma-subsampled pixel formats.
+- YUV or chroma-subsampled pixels.
 - Huffman, arithmetic, or context-adaptive entropy coding.
 - Alpha channels.
-- Decoder-side scaling or image enhancement.
-- A mandatory palette-generation implementation.
-- A mandatory dithering algorithm.
+- Decoder-side scaling or colour enhancement.
 
-These features are outside the v1 format. A future incompatible format revision may introduce them.
+These features are not required to achieve the goals of v1. A future incompatible format version may introduce them if benchmarks demonstrate a real benefit.
 
-### 1.2 Normative language
+### 1.3 Normative language
 
-The terms **MUST**, **MUST NOT**, **REQUIRED**, **SHOULD**, **SHOULD NOT**, and **MAY** are normative. Requirements using MUST or MUST NOT are necessary for v1 conformance.
+The words **MUST**, **MUST NOT**, **REQUIRED**, **SHOULD**, **SHOULD NOT**, and **MAY** are normative. Requirements using MUST or MUST NOT are necessary for v1 conformance.
 
 ---
 
-## 2. Core architecture
+## 2. Core model
 
 A CPV v1 file contains:
 
 1. A fixed-size file header.
-2. One global RGB565 palette.
+2. One global palette of RGB565 colours.
 3. A sequence of frame records.
 4. A keyframe index at the end of the file.
 
-Each frame reconstructs one complete displayed image. A frame is either:
+Every stored frame reconstructs one complete displayed image. A frame is one of:
 
-- **I-frame (keyframe):** Reconstructs every pixel without referring to an earlier frame.
-- **P-frame (delta frame):** Starts from the preceding reconstructed image and applies packets that update selected pixel ranges.
+- **I-frame (keyframe):** Reconstructs every pixel without depending on an earlier frame.
+- **P-frame (delta frame):** Starts with the preceding reconstructed image and modifies selected pixel ranges. Unchanged ranges are represented by SKIP packets.
 
-Frames are processed in row-major order:
+Pixels are processed in row-major order:
 
-`pixel_index = y * width + x`
+`pixel_index = y × width + x`
 
 The first pixel is the top-left pixel. The final pixel is the bottom-right pixel.
 
-There is no tile grid. Packet boundaries may occur at any pixel position, including across scanline boundaries. This is intentional: the encoder can describe long unchanged or repeated runs without paying per-tile metadata overhead.
+There is no tile grid. Packet boundaries may occur at any pixel position, including across scanline boundaries. This avoids per-tile metadata, local palettes, recursive traversal, and unnecessary packet boundaries at tile edges.
 
-### 2.1 Reconstruction state
+### 2.1 Reference image
 
-The reference image for a P-frame is the **decoded RGB565 image from the preceding frame**, not the original source frame and not an unquantized intermediate image.
+A P-frame MUST be decoded relative to the **previous reconstructed RGB565 image**.
 
-The encoder MUST maintain the same reconstructed image that a conforming decoder would produce. This rule prevents drift between encoder-side comparisons and decoder output.
+The reference is not the original uncompressed source frame. It is the exact image that the decoder produced after applying the previous CPV frame.
 
-An I-frame replaces the complete reconstruction state. A P-frame modifies that state in place.
+The encoder MUST maintain the same reconstruction state as the decoder. This is essential when palette quantisation is used; otherwise the encoder and decoder could disagree about whether a pixel is unchanged.
 
-### 2.2 Global palette
+### 2.2 Exact delta rule
 
-The file has exactly one palette. Each palette entry is a 16-bit RGB565 colour.
+SKIP is an exact operation in CPV v1:
 
-Palette indices are one byte wide, even when the palette contains fewer than 256 entries. This keeps the decoder simple and avoids bit-level extraction in the hot pixel loop.
+- If the next output RGB565 pixel equals the previous reconstructed pixel, it MAY be included in a SKIP run.
+- If it differs, it MUST be encoded using a data packet.
+
+A v1 encoder MUST NOT use SKIP merely because two pixels are visually similar. Approximate temporal skipping can freeze small movements, accumulate error, and cause visible trails. Lossy colour decisions belong to palette quantisation, not to the definition of SKIP.
+
+### 2.3 Global palette
+
+The file contains exactly one palette for the complete video. Every palette entry is a 16-bit RGB565 value.
+
+Palette indices are always one byte, even when fewer than 256 palette entries are present. This intentionally avoids bit extraction and keeps the decoder's pixel loop simple.
 
 A palette index MUST be in the range `0 .. palette_count - 1`.
 
-The RAW565 packet type bypasses the palette and stores direct RGB565 pixels. It is intended for image details that would otherwise suffer excessive palette quantisation.
+RAW565 packets bypass the palette and store direct RGB565 values. They are a quality escape, not the normal compression path.
 
 ---
 
 ## 3. Limits and supported properties
 
-| Property | CPV v1 requirement |
+| Property | CPV v1 |
 |---|---|
 | Minimum width | 1 pixel |
 | Maximum width | 528 pixels |
@@ -105,39 +125,52 @@ The RAW565 packet type bypasses the palette and stores direct RGB565 pixels. It 
 | Nominal frame rate | Greater than 0 and no greater than 30 FPS |
 | Recommended frame rate | 10 FPS |
 | Palette entries | 1–256 |
+| Palette index size | 1 byte |
 | Pixel format | RGB565 |
 | Frame types | I-frame and P-frame |
 | Audio | Not supported |
-| Alpha | Not supported |
-| Inter-frame references | Previous reconstructed frame only |
-| Maximum keyframe interval | 2 seconds recommended; MUST NOT exceed 10 seconds |
-| Byte order | Little-endian |
+| Alpha channel | Not supported |
+| Previous-frame references | Immediately preceding reconstructed frame only |
+| Recommended keyframe interval | 2 seconds |
+| Maximum dependency interval | 10 seconds |
 
-The width and height limits describe the encoded frame dimensions. A smaller video is valid. The decoder MUST NOT upscale or downscale the image as part of decoding.
+Smaller resolutions and lower frame rates are valid and SHOULD be used when they provide a better quality-to-size ratio.
 
-The nominal frame rate is stored as a rational number. For the standard 10 FPS profile, the values are `fps_num = 10` and `fps_den = 1`.
+The normal calculator target is 528 × 320 at 10 FPS. The maximum dimensions describe the encoded frame and do not require the player to scale the video to fill the display.
 
-Frame durations are stored individually. Consequently, a file may contain variable-duration frames or coalesced identical frames while retaining a nominal frame-rate value.
+The nominal frame rate is stored as a rational number. The normal profile uses `fps_num = 10` and `fps_den = 1`.
+
+Individual frame durations are authoritative for presentation timing. They allow coalesced identical frames and variable-duration frames without duplicating image data.
 
 ---
 
-## 4. Primitive data types and byte order
+## 4. Primitive types and integer limits
 
-All multi-byte integer fields in CPV v1 are **little-endian**.
+All multi-byte file fields are **little-endian**.
 
 | Type | Size | Description |
 |---|---:|---|
 | `uint8` | 1 byte | Unsigned 8-bit integer |
 | `uint16` | 2 bytes | Unsigned 16-bit integer |
 | `uint32` | 4 bytes | Unsigned 32-bit integer |
-| `uint64` | 8 bytes | Unsigned 64-bit integer |
 | `char[n]` | n bytes | Fixed byte sequence |
 
-Implementations MUST read and write fields explicitly in little-endian order. They MUST NOT rely on native C/C++ structure alignment or host byte order.
+CPV v1 deliberately uses 32-bit file offsets and millisecond timestamps instead of 64-bit fields. This keeps file parsing and offset arithmetic inexpensive on the calculator's 32-bit software environment.
 
-All offsets in the file are absolute byte offsets from the beginning of the file.
+Consequences:
 
-All reserved fields MUST be written as zero. A v1 decoder MUST reject a file if a reserved field or reserved flag bit is non-zero.
+- Maximum representable file size: less than 4 GiB.
+- Maximum total duration: `0xFFFFFFFF` milliseconds (approximately 49.7 days).
+- Maximum single frame payload: `0xFFFFFFFF` bytes.
+- Maximum frame count: `0xFFFFFFFF`.
+
+These limits are sufficient for the intended calculator use. A file or duration that cannot be represented MUST be rejected by the encoder.
+
+Implementations MUST read and write file fields explicitly in little-endian order. They MUST NOT rely on native structure alignment or host byte order.
+
+All file offsets are absolute byte offsets from the beginning of the file.
+
+Reserved fields MUST be written as zero. A strict v1 decoder MUST reject non-zero reserved fields and flag bits.
 
 ---
 
@@ -148,8 +181,6 @@ RGB565 stores one pixel in 16 bits:
 - Red: 5 bits.
 - Green: 6 bits.
 - Blue: 5 bits.
-
-Bit layout:
 
 ```text
 15             11 10               5 4              0
@@ -162,29 +193,27 @@ The packed value is:
 
 `rgb565 = (red5 << 11) | (green6 << 5) | blue5`
 
-For a component in the 8-bit range, a conventional conversion is:
+A conventional conversion from 8-bit RGB components is:
 
 ```text
-red5   = (red8   * 31 + 127) / 255
-green6 = (green8 * 63 + 127) / 255
-blue5  = (blue8  * 31 + 127) / 255
+red5   = (red8   × 31 + 127) / 255
+green6 = (green8 × 63 + 127) / 255
+blue5  = (blue8  × 31 + 127) / 255
 ```
 
-The resulting 16-bit value is stored little-endian.
+The 16-bit value is stored little-endian.
 
-Palette entries and RAW565 pixel values use exactly the same RGB565 representation.
-
-A decoder MUST interpret RGB565 values directly. It MUST NOT apply additional palette quantisation.
+Palette entries and RAW565 pixels use exactly the same RGB565 representation.
 
 ---
 
 ## 6. File layout
 
-A CPV v1 file is laid out as follows:
+A CPV v1 file has the following layout:
 
 ```text
 +------------------------------+
-| File Header (80 bytes)       |
+| File Header (64 bytes)       |
 +------------------------------+
 | Global Palette               |
 | palette_count × 2 bytes      |
@@ -203,55 +232,60 @@ A CPV v1 file is laid out as follows:
 +------------------------------+
 ```
 
-The palette immediately follows the 80-byte file header. Frame records immediately follow the palette. The index immediately follows the final frame record.
+The palette immediately follows the 64-byte file header. Frame records immediately follow the palette. The index immediately follows the last frame record.
 
-No padding or alignment bytes are permitted between these structures.
+No padding or alignment bytes are permitted between structures.
+
+The original CPV format used the two-byte magic `CP` and a different frame representation. CPV v1 uses `CPV\0` and is **not backward-compatible** with legacy CP files. A legacy player MUST NOT be expected to read a CPV v1 file.
 
 ---
 
 ## 7. File header
 
-The file header is exactly **80 bytes**.
+The file header is exactly **64 bytes**.
 
 | Offset | Field | Type | Size | Required value / meaning |
 |---:|---|---|---:|---|
 | 0 | `magic` | char[4] | 4 | ASCII `CPV\0` |
-| 4 | `version_major` | uint16 | 2 | 1 |
-| 6 | `version_minor` | uint16 | 2 | 0 |
-| 8 | `header_size` | uint32 | 4 | 80 |
-| 12 | `flags` | uint32 | 4 | 0 in v1 |
-| 16 | `width` | uint16 | 2 | 1–528 |
-| 18 | `height` | uint16 | 2 | 1–320 |
-| 20 | `fps_num` | uint32 | 4 | Positive numerator |
-| 24 | `fps_den` | uint32 | 4 | Positive denominator |
-| 28 | `frame_count` | uint32 | 4 | Number of frame records |
-| 32 | `palette_count` | uint16 | 2 | 1–256 |
-| 34 | `reserved0` | uint16 | 2 | 0 |
-| 36 | `palette_offset` | uint64 | 8 | MUST equal 80 |
-| 44 | `frames_offset` | uint64 | 8 | First frame record |
-| 52 | `index_offset` | uint64 | 8 | Keyframe index |
-| 60 | `duration_ms` | uint64 | 8 | Sum of all frame durations |
-| 68 | `reserved1` | uint8[12] | 12 | All zero |
-| | **Total** | | **80** | |
+| 4 | `version_major` | uint8 | 1 | 1 |
+| 5 | `version_minor` | uint8 | 1 | 0 |
+| 6 | `header_size` | uint16 | 2 | 64 |
+| 8 | `flags` | uint32 | 4 | 0 in v1 |
+| 12 | `width` | uint16 | 2 | 1–528 |
+| 14 | `height` | uint16 | 2 | 1–320 |
+| 16 | `fps_num` | uint16 | 2 | Positive numerator |
+| 18 | `fps_den` | uint16 | 2 | Positive denominator |
+| 20 | `frame_count` | uint32 | 4 | Number of stored frame records |
+| 24 | `palette_count` | uint16 | 2 | 1–256 |
+| 26 | `reserved0` | uint16 | 2 | 0 |
+| 28 | `palette_offset` | uint32 | 4 | MUST equal 64 |
+| 32 | `frames_offset` | uint32 | 4 | First frame record |
+| 36 | `index_offset` | uint32 | 4 | Keyframe index |
+| 40 | `duration_ms` | uint32 | 4 | Sum of all stored frame durations |
+| 44 | `reserved1` | uint8[20] | 20 | All zero |
+| | **Total** | | **64** | |
 
 ### 7.1 Header validation
 
-A v1 decoder MUST verify all of the following before playback:
+Before playback, a decoder MUST verify:
 
-- The magic value is exactly `CPV\0`.
-- The major version is 1. A minor version greater than 0 MUST be rejected by a strict v1.0 decoder.
-- `header_size` is exactly 80.
-- `flags`, `reserved0`, and every byte of `reserved1` are zero.
-- Width, height, frame rate, frame count, and palette count are within their allowed ranges.
-- `fps_num` and `fps_den` are non-zero.
-- The rational frame rate does not exceed 30 FPS.
-- `palette_offset` is exactly 80.
-- `frames_offset` equals `palette_offset + palette_count × 2`.
-- `index_offset` is greater than `frames_offset` and lies within the file.
-- The index and frame records fit inside the actual file size.
+- Magic is exactly `CPV\0`.
+- Major version is 1 and minor version is 0.
+- Header size is exactly 64.
+- Flags and all reserved fields are zero.
+- Width and height are within the specified limits.
+- FPS numerator and denominator are non-zero.
+- The rational FPS does not exceed 30.
+- Frame count is non-zero.
+- Palette count is in the range 1–256.
+- `palette_offset` equals 64.
+- `frames_offset = palette_offset + palette_count × 2`.
+- `index_offset` is greater than `frames_offset` and inside the file.
+- Frame records fit before the index.
+- The index fits inside the actual file.
 - The sum of frame durations equals `duration_ms`.
 
-All offset and size calculations MUST use overflow-safe arithmetic.
+All offset and size calculations MUST be checked for overflow before use.
 
 ---
 
@@ -259,65 +293,65 @@ All offset and size calculations MUST use overflow-safe arithmetic.
 
 The palette starts at `palette_offset` and contains exactly `palette_count` entries.
 
-Each entry is:
+Each entry is a little-endian RGB565 value:
 
 | Field | Type | Size |
 |---|---|---:|
 | `colour` | uint16 | 2 bytes |
 
-The entries are in palette-index order. Entry zero corresponds to index zero.
-
-Each entry is a little-endian RGB565 value.
-
 The palette block size is:
 
 `palette_size = palette_count × 2`
 
-The first frame begins at:
+The first frame starts at:
 
 `frames_offset = palette_offset + palette_size`
 
-A decoder MUST read the complete palette before decoding the first frame. It SHOULD keep the palette in a small fixed array of 256 RGB565 entries.
+Palette entries MUST be unique in v1. If the source video needs fewer distinct palette colours, the encoder MUST store only the required number of entries rather than padding the palette with duplicates.
+
+A decoder SHOULD keep the palette in a fixed array of 256 RGB565 values. The maximum palette memory is 512 bytes.
 
 ### 8.1 Palette generation
 
-Palette generation is an encoder operation and is not part of decoding. The format does not prescribe a specific quantisation algorithm.
+Palette generation is performed by the desktop encoder. It is not part of decoding.
 
 A conforming encoder:
 
-- MUST generate one palette for the complete video.
-- MUST use between 1 and 256 entries.
-- MUST map every palette-coded pixel to a valid palette entry.
-- SHOULD build the palette using representative samples from the complete video, not only the first frame.
-- SHOULD weight temporally important or visually representative frames during palette generation.
+- MUST create one palette for the complete video.
+- MUST use between 1 and 256 unique entries.
+- MUST ensure every palette-coded pixel references a valid entry.
+- SHOULD analyse representative frames from the complete video, not just the first frame.
+- SHOULD account for scene changes and visually important frames.
 - MAY use FFmpeg palette-generation filters or a custom quantiser.
-- MAY apply controlled denoising before palette generation and frame encoding.
+- MAY denoise source frames before palette generation and encoding.
+- MAY use spatial dithering.
 
-A single global palette avoids the repeated palette headers and repeated nearest-colour searches associated with independent local palettes.
+A global palette avoids storing local palette headers repeatedly and allows one reusable colour lookup table to be used for the whole conversion.
 
-### 8.2 Palette mapping and lookup tables
+### 8.2 Fast palette mapping
 
-The encoder SHOULD precompute a mapping from RGB565 source colours to the nearest palette entry.
+The encoder SHOULD avoid searching all palette entries for every source pixel.
 
-There are only 65,536 possible RGB565 values. A 65,536-byte lookup table can therefore map every possible RGB565 value to its palette index.
+A recommended approach is:
 
-This changes per-pixel palette mapping from a search through up to 256 colours into one table lookup.
+1. Convert an input pixel to RGB565.
+2. Build a 65,536-byte lookup table once per conversion.
+3. Store in each table position the nearest palette index for that RGB565 value.
+4. Map each source pixel using one lookup.
 
-The encoder MAY use a different mapping strategy, provided the output indices refer to the palette stored in the file.
+The table covers every possible 16-bit RGB565 value. It requires 64 KiB on the desktop and is not needed by the calculator.
 
-The exact colour-distance function is encoder-defined. A recommended integer metric is:
+A recommended integer colour-distance metric is:
 
 `D = 3 × ΔR² + 4 × ΔG² + 2 × ΔB²`
 
-where the component differences are measured in their native RGB565 ranges (5, 6, and 5 bits).
+where the component differences use their native 5-, 6-, and 5-bit ranges. The exact quantiser and tie-breaking policy are encoder-defined.
 
 ---
 
 ## 9. Frame record
 
-Every frame is stored as one frame record.
-
-The frame header is exactly **20 bytes**:
+Every stored frame is represented by a frame record. Its fixed header is exactly **20 bytes**.
 
 | Offset | Field | Type | Size | Meaning |
 |---:|---|---|---:|---|
@@ -325,40 +359,48 @@ The frame header is exactly **20 bytes**:
 | 4 | `frame_type` | uint8 | 1 | 0 = I-frame, 1 = P-frame |
 | 5 | `flags` | uint8 | 1 | 0 in v1 |
 | 6 | `header_size` | uint16 | 2 | 20 |
-| 8 | `frame_number` | uint32 | 4 | Sequential record number, starting at 0 |
-| 12 | `duration_ms` | uint32 | 4 | Display duration of this frame |
+| 8 | `frame_number` | uint32 | 4 | Sequential stored-record number, starting at 0 |
+| 12 | `duration_ms` | uint32 | 4 | Display duration |
 | 16 | `payload_size` | uint32 | 4 | Number of payload bytes |
 | | **Total** | | **20** | |
 
 The payload begins immediately after the frame header and contains exactly `payload_size` bytes.
 
-The next frame record begins at:
+The next frame begins at:
 
 `next_frame_offset = current_frame_offset + 20 + payload_size`
 
 ### 9.1 Frame numbering
 
-The first frame record MUST have `frame_number = 0` and MUST be an I-frame.
+The first stored record MUST have frame number zero and MUST be an I-frame.
 
-Each subsequent record MUST increment `frame_number` by exactly one.
+Every subsequent stored record increments the frame number by exactly one.
 
-`frame_count` in the file header is the number of stored frame records. If the encoder combines identical consecutive source frames into one longer-duration record, the combined result counts as one stored frame record.
+`frame_count` in the file header counts stored frame records, not necessarily the number of source frames before identical frames were coalesced.
 
-### 9.2 Frame duration
+### 9.2 Frame duration and coalescing
 
 `duration_ms` is the amount of time for which the reconstructed image is displayed.
 
 A frame duration MUST be greater than zero.
 
-The total video duration is the sum of all frame durations and MUST equal the file header's `duration_ms`.
+The encoder SHOULD coalesce consecutive frames when their reconstructed RGB565 images are identical:
 
-The nominal frame rate describes the intended output sampling rate. Individual frame durations remain authoritative for playback timing.
+- Do not write a new frame record.
+- Extend the duration of the previous stored frame.
+- Preserve the same reconstructed reference image.
+
+This is exact frame deduplication, not approximate motion suppression. It is especially useful for static scenes, pause screens, slides, and source videos whose frame rate is higher than their actual image-change rate.
+
+When coalescing, the encoder MUST add durations without exceeding the uint32 limit. If the combined duration would overflow, it MUST start a new valid I-frame record.
+
+The total video duration is the sum of stored frame durations and MUST equal the file header's `duration_ms`.
 
 ---
 
 ## 10. Packet stream
 
-The frame payload is a sequence of packets. Each packet describes a run of consecutive pixels in the linear raster order.
+The frame payload is a sequence of packets. Each packet describes a run of consecutive pixels in raster order.
 
 There are exactly four packet types:
 
@@ -369,29 +411,43 @@ There are exactly four packet types:
 | `10` | SKIP | Preserve pixels from the previous frame |
 | `11` | RAW565 | A sequence of direct RGB565 pixels |
 
-The two most significant bits of the first packet byte contain the opcode. The six least significant bits encode the run length.
+The two most significant bits of the first packet byte contain the opcode. The remaining bits encode the run length.
 
-### 10.1 Packet header and run length
+### 10.1 Compact packet header
 
-Let `b` be the first packet byte.
+CPV v1 uses a compact one-byte or two-byte packet header. This keeps the common case small while allowing long unchanged or repeated runs.
+
+The first byte is:
 
 ```text
   7 6 5 4 3 2 1 0
-+-----+-----------+
-| OP  | LENGTH    |
-+-----+-----------+
-  2 bits  6 bits
++-----+-+---------+
+| OP  |L| LENGTH  |
++-----+-+---------+
+  2b  1b   5b
 ```
 
-The run length is decoded as follows:
+- Bits 7–6: packet opcode.
+- Bit 5: length form.
+- Bits 4–0: short length or high bits of a long length.
 
-- If `b & 0x3F` is in the range 0–62, the run length is `(b & 0x3F) + 1`.
-- If `b & 0x3F` equals 63, the next two bytes contain the run length as a little-endian uint16.
-- An extended run length MUST be in the range 64–65,535.
+**Short form — bit 5 is zero**
 
-Thus, short packets encode lengths from 1 to 63 using one header byte. Long packets encode lengths from 64 to 65,535 using a three-byte header.
+`run_length = (first_byte & 0x1F) + 1`
 
-Runs longer than 65,535 pixels MUST be split into multiple packets.
+Short packets encode run lengths from 1 to 32 pixels and use a one-byte header.
+
+**Long form — bit 5 is one**
+
+The next byte is read. The run length is:
+
+`run_length = ((first_byte & 0x1F) << 8) | second_byte`
+
+Long packets encode run lengths from 33 to 8,191 pixels and use a two-byte header.
+
+A long-form run length below 33 is invalid. Runs longer than 8,191 pixels MUST be split into multiple packets.
+
+The packet header is a bit-field byte sequence. The general little-endian rule for file fields does not change this explicit packet encoding.
 
 ### 10.2 INDEX_LITERAL — opcode 00
 
@@ -410,15 +466,13 @@ Packet layout:
 +---------------------------+
 ```
 
-The packet contains exactly `length` index bytes following the packet header.
+The packet contains exactly `run_length` index bytes after the packet header.
 
-For every index:
+Every index MUST be smaller than `palette_count`.
 
-`0 <= index < palette_count`
+The decoder writes the corresponding palette RGB565 value for each index.
 
-The decoder writes the corresponding palette RGB565 colour to the output image.
-
-INDEX_LITERAL is intended for changed areas containing several different palette colours that are not efficiently represented by repeated-colour packets.
+INDEX_LITERAL is intended for changed areas containing several different palette colours. It avoids the overhead of emitting a separate repeat packet for every colour transition.
 
 ### 10.3 INDEX_REPEAT — opcode 01
 
@@ -434,15 +488,15 @@ Packet layout:
 +---------------------------+
 ```
 
-The decoder reads one index byte and writes the corresponding palette colour `length` times.
+The decoder reads one index byte and writes its palette colour `run_length` times.
 
 The index MUST be smaller than `palette_count`.
 
-INDEX_REPEAT is useful for flat areas, backgrounds, UI elements, and any repeated palette colour.
+INDEX_REPEAT is efficient for flat regions, backgrounds, UI elements, and repeated colours.
 
 ### 10.4 SKIP — opcode 10
 
-SKIP advances the output position without changing any pixels.
+SKIP advances the output position without writing any pixel values.
 
 Packet layout:
 
@@ -454,15 +508,15 @@ Packet layout:
 
 SKIP is valid only in P-frames.
 
-For every pixel covered by SKIP, the decoder keeps the RGB565 value already present at the same position in the previous reconstructed frame.
+For each pixel covered by SKIP, the decoder retains the RGB565 value already stored at the same position in the previous reconstructed frame.
 
 A decoder MUST reject SKIP in an I-frame.
 
-SKIP is intended for unchanged pixels and is especially effective in animation, screen recordings, static camera scenes, and videos with large stationary backgrounds.
+SKIP is intended for unchanged pixels and is particularly effective for animation, screen recordings, stationary backgrounds, and low-motion footage.
 
 ### 10.5 RAW565 — opcode 11
 
-RAW565 stores direct RGB565 pixel values without palette quantisation.
+RAW565 stores direct RGB565 pixel values without palette mapping.
 
 Packet layout:
 
@@ -477,73 +531,79 @@ Packet layout:
 +---------------------------+
 ```
 
-Each pixel is a little-endian RGB565 value. The packet contains exactly `length × 2` pixel bytes following the packet header.
+Every pixel value is a little-endian uint16. The packet contains exactly `run_length × 2` bytes after the header.
 
-RAW565 is intended for areas where mapping to the global palette would create too much visual error. It is also the lossless-within-RGB565 fallback for high-detail content.
+The decoder writes each RGB565 value directly.
 
-The decoder MUST write each raw value directly to the reconstructed image.
+RAW565 is a quality escape for detail that cannot be represented acceptably by the global palette. It is not the normal compression mode: a literal palette index costs one byte per pixel, whereas RAW565 costs two.
 
-### 10.6 Packet position and coverage
+The encoder SHOULD select RAW565 only when the quality benefit is worth the additional data. For lossy quality profiles, palette coding SHOULD remain the default.
 
-Packets are applied in order. The first packet begins at pixel index zero. Every packet advances the current output position by exactly its run length.
+### 10.6 Packet coverage
 
-The sum of all packet run lengths in a frame MUST equal:
+Packets are applied in sequence. The first packet begins at pixel zero. Every packet advances the pixel position by its run length.
+
+The total run length of all packets in a frame MUST equal:
 
 `pixel_count = width × height`
 
-The decoder MUST reject a frame if:
+Packets may cross scanline boundaries. A decoder MUST NOT assume packet boundaries align to rows.
 
-- A packet would advance beyond `pixel_count`.
-- The packet payload is truncated.
-- A palette index is invalid.
-- SKIP appears in an I-frame.
-- The packet stream ends before exactly `pixel_count` pixels have been covered.
-- Bytes remain unused at the end of the declared frame payload.
+A decoder MUST reject a frame if:
 
-Packets may cross scanline boundaries. The decoder MUST NOT assume that packet boundaries align to rows.
+- A packet would advance beyond the frame's pixel count.
+- A packet payload is truncated.
+- An index is outside the palette.
+- SKIP occurs in an I-frame.
+- The payload ends before exactly `pixel_count` pixels have been covered.
+- Unconsumed bytes remain at the end of the declared payload.
 
 ---
 
 ## 11. Frame reconstruction
 
-### 11.1 I-frame reconstruction
+### 11.1 I-frame
 
-An I-frame defines the complete image and MUST NOT contain SKIP packets.
+An I-frame MUST define every pixel and MUST NOT contain SKIP packets.
 
-The decoder starts at pixel position zero and applies packets until exactly `width × height` pixels have been written.
+The decoder begins at pixel position zero and applies packets until exactly `width × height` pixels have been written.
 
-Only after the entire frame payload has been validated and decoded should the frame be considered a valid reference for subsequent P-frames.
+A successfully decoded I-frame establishes the reference image for following P-frames.
 
-### 11.2 P-frame reconstruction
+### 11.2 P-frame
 
 A P-frame is decoded against the immediately preceding reconstructed frame.
 
-The decoder begins at pixel position zero. For each packet:
+The decoder begins at pixel position zero:
 
 - INDEX_LITERAL writes the specified palette colours.
 - INDEX_REPEAT writes one palette colour repeatedly.
-- SKIP preserves the previous RGB565 pixels.
-- RAW565 writes the specified direct RGB565 values.
+- SKIP keeps existing pixels.
+- RAW565 writes direct RGB565 values.
 
-After all packets have been processed, the output position MUST equal `width × height`.
+After the payload has been decoded, the position MUST equal `width × height`.
 
-No frame may refer to an arbitrary earlier frame. P-frames refer only to the previous reconstructed frame.
+A P-frame MUST NOT refer to any frame other than the immediately preceding reconstructed image.
 
 ### 11.3 Keyframe interval
 
-The first frame MUST be an I-frame.
+The first stored frame MUST be an I-frame.
 
-Encoders SHOULD create a new I-frame approximately once per second. The interval between I-frames MUST NOT exceed 10 seconds.
+Encoders SHOULD create an I-frame approximately every 2 seconds. The time span over which a P-frame depends on a preceding I-frame MUST NOT exceed 10 seconds.
 
-For the normal 10 FPS profile, one I-frame per 10 stored source-frame intervals is recommended. Earlier I-frames MAY be emitted after scene changes or when a P-frame would be larger than a new I-frame.
+If an unchanged image is coalesced for longer than 10 seconds, no new record is needed during that unchanged interval. The next changed frame MUST be an I-frame if the previous keyframe is now more than 10 seconds old.
 
-Every I-frame MUST have an entry in the keyframe index.
+An encoder MAY create an I-frame earlier:
+
+- At a scene change.
+- When a P-frame would be larger than a new I-frame.
+- When seeking performance benefits from a shorter interval.
+
+Every I-frame MUST have one index entry.
 
 ### 11.4 Scene changes
 
-The encoder MAY detect scene changes and emit an I-frame at the beginning of the new scene.
-
-Scene-change detection is encoder-defined. It is not required for decoding.
+Scene-change detection is encoder-defined. It MAY be used to create an I-frame at the beginning of a new scene.
 
 ---
 
@@ -558,211 +618,231 @@ The index begins with an 8-byte header:
 | 0 | `magic` | char[4] | 4 |
 | 4 | `entry_count` | uint32 | 4 |
 
-The magic value MUST be ASCII `IDX1`.
+The magic is ASCII `IDX1`.
 
-The header is followed by `entry_count` entries. Each entry is exactly 20 bytes:
+The header is followed by `entry_count` entries. Each entry is exactly **12 bytes**:
 
 | Offset | Field | Type | Size |
 |---:|---|---|---:|
 | 0 | `frame_number` | uint32 | 4 |
-| 4 | `elapsed_ms` | uint64 | 8 |
-| 12 | `file_offset` | uint64 | 8 |
+| 4 | `elapsed_ms` | uint32 | 4 |
+| 8 | `file_offset` | uint32 | 4 |
 
-Each entry points to an I-frame.
+Each entry references an I-frame:
 
-- `frame_number` is the record number of the keyframe.
-- `elapsed_ms` is the presentation time of the keyframe relative to the start of the video.
-- `file_offset` is the absolute offset of the corresponding `FRM1` frame header.
+- `frame_number`: stored frame-record number.
+- `elapsed_ms`: presentation start time from the beginning of the video.
+- `file_offset`: absolute offset of the frame's `FRM1` header.
 
-The index MUST contain an entry for frame zero.
+Entries MUST be ordered by increasing frame number, elapsed time, and file offset.
 
-Entries MUST be sorted by increasing frame number and increasing elapsed time. Frame offsets MUST also increase strictly.
+The index MUST contain an entry for frame zero at elapsed time zero.
 
-The number of entries MUST equal the number of I-frames in the frame sequence.
+The number of entries MUST equal the number of I-frames.
 
 The index size is:
 
-`index_size = 8 + entry_count × 20`
+`index_size = 8 + entry_count × 12`
 
-The index MUST end exactly at end-of-file. Trailing bytes are not permitted in v1.
+The index MUST end exactly at end-of-file. Trailing bytes are invalid in v1.
 
 ### 12.1 Seeking
 
 To seek to a target time:
 
-1. Find the index entry with the greatest `elapsed_ms` that is less than or equal to the target time.
+1. Find the entry with the greatest `elapsed_ms` that is less than or equal to the target time.
 2. Seek to its `file_offset`.
 3. Decode that I-frame.
-4. Decode following frames in order until the target time is reached.
-5. Display the frame whose presentation interval contains the target time.
+4. Decode subsequent frames in order until the target presentation interval is reached.
+5. Display the frame whose interval contains the target time.
 
-A decoder MUST NOT begin P-frame decoding without a valid preceding I-frame.
+A decoder MUST NOT start P-frame decoding without a valid preceding I-frame.
+
+A target time inside a coalesced frame's duration refers to that same stored image.
 
 ---
 
-## 13. Encoder requirements and recommendations
+## 13. Encoder design
 
-The exact encoder implementation is not part of the binary format. The following describes the recommended CPV v1 encoding pipeline.
+The exact implementation language and palette algorithm are not part of the binary format. This section defines the recommended conversion strategy.
 
-### 13.1 Input and scaling
+### 13.1 Input pipeline
 
-The encoder SHOULD accept video sources supported by FFmpeg.
+The encoder SHOULD accept input formats supported by FFmpeg.
 
 It SHOULD:
 
 1. Read the first video stream.
-2. Ignore audio, subtitle, and data streams.
-3. Convert to the requested target frame rate.
-4. Scale to the requested output dimensions.
-5. Preserve source aspect ratio by default, using letterboxing when required.
-6. Convert source pixels to RGB565 before palette mapping.
+2. Ignore audio, subtitles, and data streams.
+3. Resample to the selected output frame rate.
+4. Scale to the selected output dimensions.
+5. Preserve aspect ratio by default and letterbox when required.
+6. Convert each output pixel to RGB565.
+7. Map the RGB565 pixel through the global palette lookup table.
 
-The output width and height MUST NOT exceed 528 × 320.
-
-The normal target is 528 × 320 at 10 FPS, but smaller dimensions and lower frame rates are valid and often beneficial for the calculator.
+The output dimensions MUST NOT exceed 528 × 320. The normal target is 528 × 320 at 10 FPS.
 
 ### 13.2 Palette analysis
 
-The encoder SHOULD analyse representative frames from the complete video and build one global palette.
+The encoder SHOULD build one palette for the complete video.
 
-It SHOULD avoid generating a palette from only the first frame. A palette that represents the whole video reduces colour error in later scenes.
+To avoid spending unnecessary time analysing every frame at full resolution, the encoder MAY sample representative frames. A useful strategy is:
 
-The encoder MAY use temporal sampling rather than analysing every frame during palette generation.
+- Sample at a lower temporal rate than the output video.
+- Include frames around detected scene changes.
+- Include representative high-motion and high-detail scenes.
+- Avoid building the palette from only the opening seconds.
 
-### 13.3 Palette lookup
+A global palette SHOULD contain up to 256 colours when quality is the priority. Smaller palettes MAY be selected for stronger compression.
 
-The encoder SHOULD build a reusable RGB565-to-palette-index lookup table once per conversion.
+A palette based on the complete video is usually more reliable than a palette based only on the first frame.
 
-A 65,536-byte table is sufficient for all possible RGB565 inputs. Once built, the encoder can map source pixels to palette indices with one lookup each.
+### 13.3 Fast colour lookup
 
-The encoder SHOULD NOT perform a fresh search through all palette entries for every pixel.
+The encoder SHOULD create the RGB565-to-palette lookup table once. It MUST NOT perform a 256-colour nearest-neighbour search for every pixel in the normal encoding loop.
 
-### 13.4 Delta comparison
+The calculator decoder does not need this lookup table. It only needs the palette stored in the file.
 
-The encoder MUST compare each new source frame against the previous **reconstructed** frame.
+### 13.4 Frame encoding algorithm
 
-For each pixel, the encoder determines the value that will actually be written to the output:
+The encoder SHOULD use the following high-level process:
 
-- a palette colour, or
-- a direct RAW565 colour.
+1. Convert the next source frame to RGB565.
+2. Map pixels to the global palette, except pixels intentionally selected for RAW565.
+3. Determine the exact RGB565 value that the decoder will reconstruct at each pixel.
+4. Compare that reconstructed value with the previous reconstructed frame.
+5. In P-frames, gather consecutive unchanged pixels into SKIP runs.
+6. Gather consecutive equal palette indices into INDEX_REPEAT runs.
+7. Gather mixed palette-index sequences into INDEX_LITERAL runs.
+8. Gather selected direct-colour pixels into RAW565 runs.
+9. Split runs when they exceed 8,191 pixels.
+10. Write the frame record and update the encoder's reconstruction state.
 
-If that reconstructed value equals the previous reconstructed pixel, the pixel is eligible for SKIP.
-
-This rule is important when lossy palette mapping is enabled: comparison against the unquantised source would otherwise produce incorrect deltas.
+The encoder MAY use lookahead to select the smallest representation. It SHOULD compare actual encoded byte counts, including packet headers.
 
 ### 13.5 Packet selection
 
-The encoder SHOULD use the following strategies:
+For a changed palette-coded sequence:
 
-- Use SKIP for consecutive unchanged pixels in P-frames.
-- Use INDEX_REPEAT for repeated palette indices.
-- Use INDEX_LITERAL for consecutive non-repeating palette indices.
-- Use RAW565 for consecutive direct RGB565 values that are not represented by the palette within the selected quality policy.
-- Use the largest legal run length for each packet type when doing so does not increase total output size.
+- INDEX_REPEAT is preferred for a run of the same index.
+- INDEX_LITERAL is preferred for a mixed sequence of indices.
+- A short one-pixel sequence MAY use either representation; the smaller or simpler choice SHOULD be used.
 
-The encoder MAY use lookahead or rate-distortion analysis to choose between INDEX_LITERAL, INDEX_REPEAT, and RAW565.
+RAW565 is a quality decision. It MUST NOT be selected merely because it is a valid representation. Since it uses twice as many pixel bytes as INDEX_LITERAL, its use SHOULD be justified by a defined visual-quality threshold.
 
-The encoder SHOULD avoid emitting many one-pixel packets when a single literal packet can encode the same region.
+The encoder SHOULD avoid producing a large number of one-pixel packets when one literal packet can encode a mixed sequence.
 
-### 13.6 Frame type selection
+### 13.6 Frame deduplication
 
-The encoder MUST emit the first frame as an I-frame.
+The encoder SHOULD compare the newly reconstructed frame with the preceding reconstructed frame.
 
-It SHOULD emit I-frames approximately every second and MUST NOT exceed the 10-second maximum interval.
+When they are identical, it SHOULD extend the previous stored frame's duration instead of writing a new all-SKIP P-frame.
 
-The encoder MAY choose an earlier I-frame when a scene changes or when a P-frame would be larger than an I-frame.
+This decision MUST be based on exact reconstructed RGB565 pixels, not a perceptual threshold.
 
-### 13.7 Streaming and memory
+### 13.7 Keyframes
 
-The encoder SHOULD process frames as a stream instead of loading the entire video into memory.
+The encoder MUST start with an I-frame.
 
-It needs only:
+The recommended keyframe interval is 2 seconds. The maximum P-frame dependency interval is 10 seconds, subject to the static-frame coalescing rule in Section 11.3.
 
-- Current source frame.
+The encoder MAY insert additional I-frames after scene changes or when a P-frame would not provide a size advantage.
+
+### 13.8 Streaming output
+
+The encoder SHOULD process frames sequentially and stream the encoded output to disk.
+
+It SHOULD NOT keep the complete compressed video in RAM or repeatedly reallocate one buffer to append each frame.
+
+Recommended memory use:
+
+- Current decoded source frame.
 - Previous reconstructed frame.
-- Current reconstructed frame (or an in-place reconstruction strategy).
+- Current reconstructed frame or an in-place reconstruction buffer.
 - Global palette and lookup table.
-- Current frame payload buffer.
-- Keyframe index entries.
+- Current frame packet buffer.
+- Small index-entry array.
 
-The output file SHOULD be written to a temporary file and atomically renamed after successful completion. A failed conversion SHOULD NOT leave a partially written final output file.
+The encoder SHOULD write to a temporary file and atomically rename it after successful completion. A failed conversion SHOULD NOT leave a partially written final output file.
 
 ---
 
 ## 14. Quality and compression policy
 
-Colour quantisation is an encoder-side operation. The decoder does not know which quality setting was used.
+Lossy colour quantisation is an intended feature of CPV.
 
-The encoder MAY expose a quality parameter from 0 to 100:
+The encoder MAY expose a quality parameter from 0 to 100. The parameter is an encoder policy and is not stored as a decoder requirement in the file.
 
-- Lower values prioritise smaller palettes and smaller output files.
-- Higher values prioritise visual fidelity.
-- RAW565 MAY preserve detail when palette mapping would introduce excessive error.
-- Quality 100 SHOULD preserve the source after conversion to RGB565 by using RAW565 whenever palette mapping would change a pixel.
-- Quality below 100 MAY apply lossy palette mapping according to the encoder's documented policy.
+Recommended behaviour:
 
-The precise quantiser, palette-size mapping, colour-distance threshold, and dithering strategy are encoder-defined. Different encoders may produce different valid CPV files from the same source.
+- Lower quality values SHOULD use fewer global palette colours and favour compact palette-coded data.
+- Higher quality values SHOULD use more palette colours and reduce colour error.
+- RAW565 MAY preserve important details when palette quantisation would be visibly unacceptable.
+- Quality 100 SHOULD preserve the source after conversion to RGB565, using RAW565 where the global palette cannot represent a source pixel exactly.
+- Quality values below 100 MAY quantise pixels to the global palette.
 
-Dithering MAY be used. Temporal dithering SHOULD be avoided because it can introduce visible flicker in animation and moving scenes.
+The exact palette-size mapping, colour-distance thresholds, sampling policy, and dithering strategy are encoder-defined. An encoder MUST document its quality mapping so that results are reproducible.
 
-### 14.1 Compression trade-offs
+The normal calculator profile SHOULD prioritise palette-coded data and exact SKIP detection. RAW565 SHOULD be used selectively.
 
-The format intentionally has no single compression mode for every pixel:
+### 14.1 Denoising
 
-- Stable regions are cheap because of SKIP.
-- Flat regions are cheap because of INDEX_REPEAT.
-- Detailed palette-coded regions are compact with INDEX_LITERAL.
-- High-detail regions can use RAW565 to avoid excessive colour loss.
+Optional spatial or temporal denoising MAY be applied before palette mapping.
 
-The encoder is responsible for choosing a suitable representation. The decoder remains simple regardless of that choice.
+Denoising can substantially reduce the number of distinct colours and small frame-to-frame changes in noisy live-action footage. Excessive denoising can remove detail and SHOULD NOT be enabled without a quality trade-off.
+
+Temporal denoising MUST NOT alter the semantics of SKIP. SKIP remains an exact comparison of reconstructed pixel values.
+
+### 14.2 Dithering
+
+Spatial dithering MAY be applied during palette mapping.
+
+Temporal dithering SHOULD be avoided because changing dither patterns can create flicker and prevent otherwise static pixels from being skipped.
 
 ---
 
 ## 15. Decoder architecture
 
-A conforming decoder requires:
+A conforming decoder needs:
 
-- One 80-byte file header.
-- A palette buffer of up to 256 RGB565 values.
-- One RGB565 framebuffer of `width × height` pixels.
-- A small frame-header structure.
-- A packet reader and pixel cursor.
-- A keyframe index reader for seeking.
+- The 64-byte file header.
+- A palette of up to 256 RGB565 values (512 bytes).
+- A persistent reconstructed image surface.
+- A 20-byte frame-header structure.
+- A small packet reader.
+- A keyframe index reader when seeking is required.
 
-A second framebuffer is optional. The format does not require double buffering.
+A second framebuffer is optional. A complete compressed frame buffer is not required.
 
-### 15.1 Sequential decoding procedure
+### 15.1 Sequential decoding
 
-A decoder SHOULD follow this sequence:
+A decoder SHOULD:
 
-1. Read and validate the 80-byte file header.
+1. Read and validate the file header.
 2. Read the global palette.
 3. Seek to `frames_offset`.
 4. Read the next 20-byte frame header.
-5. Validate the frame header and payload bounds.
-6. Read and decode packets in payload order.
-7. Verify exact pixel coverage and exact payload consumption.
-8. Present the reconstructed framebuffer for the frame duration.
-9. Continue with the next frame record.
+5. Validate frame type, number, duration, and payload bounds.
+6. Decode packet data in order.
+7. Validate exact pixel coverage and payload consumption.
+8. Present the reconstructed image for the specified duration.
+9. Continue with the following record.
 
-### 15.2 Packet decoding pseudocode
-
-The following pseudocode describes the packet loop. It is illustrative; implementations may use different internal structures.
+### 15.2 Packet decoder pseudocode
 
 ```text
 pixel_position = 0
 
-while payload_bytes_remaining > 0:
-    token = read_u8()
+while frame_payload_bytes_remaining > 0:
+    first = read_u8()
+    opcode = first >> 6
 
-    opcode = token >> 6
-    length_code = token & 0x3F
-
-    if length_code == 63:
-        run_length = read_u16_le()
-        require 64 <= run_length <= 65535
+    if (first & 0x20) == 0:
+        run_length = (first & 0x1F) + 1
     else:
-        run_length = length_code + 1
+        second = read_u8()
+        run_length = ((first & 0x1F) << 8) | second
+        require 33 <= run_length <= 8191
 
     require run_length <= pixel_count - pixel_position
 
@@ -771,14 +851,14 @@ while payload_bytes_remaining > 0:
             repeat run_length times:
                 index = read_u8()
                 require index < palette_count
-                framebuffer[pixel_position] = palette[index]
+                surface[pixel_position] = palette[index]
                 pixel_position += 1
 
         INDEX_REPEAT:
             index = read_u8()
             require index < palette_count
             repeat run_length times:
-                framebuffer[pixel_position] = palette[index]
+                surface[pixel_position] = palette[index]
                 pixel_position += 1
 
         SKIP:
@@ -787,126 +867,157 @@ while payload_bytes_remaining > 0:
 
         RAW565:
             repeat run_length times:
-                framebuffer[pixel_position] = read_u16_le()
+                surface[pixel_position] = read_u16_le()
                 pixel_position += 1
 
-require pixel_position == pixel_count
-require payload_bytes_remaining == 0
+require pixel_position == width * height
+require frame_payload_bytes_remaining == 0
 ```
 
-For SKIP, advancing the cursor leaves existing framebuffer values untouched.
+A production decoder MUST check the remaining frame payload before every read. The pseudocode omits those repeated bounds checks for readability.
 
-A production decoder MUST also validate every read against the remaining frame payload before accessing bytes.
+### 15.3 Streaming packet reads
 
-### 15.3 Presentation timing
+The calculator decoder SHOULD read packet data from a buffered file stream. It SHOULD NOT allocate a buffer as large as the entire compressed frame unless the platform's file API makes streaming impractical.
 
-The player SHOULD schedule presentation based on each frame's `duration_ms`.
+For INDEX_LITERAL, indices can be consumed sequentially. For INDEX_REPEAT, one colour is read and written repeatedly. For SKIP, the pixel cursor advances without writing. For RAW565, values are read and copied sequentially.
 
-The target playback rate is 10 FPS. The decoder's performance target is to complete frame decoding within the corresponding playback interval.
+### 15.4 Using LCD memory as the reference surface
 
-If decoding cannot keep up, the player MAY drop presentation of overdue frames while still maintaining a valid reference state by decoding all dependent frames in order. It MUST NOT skip P-frame reconstruction if later frames depend on it.
+The logical reference image must persist between frames. The specification does not require that it reside in a separate RAM allocation.
+
+When the encoded image is displayed 1:1 and the LCD VRAM provides a stable RGB565 surface, a calculator implementation MAY use that VRAM region directly as the reconstructed image. In this configuration:
+
+- P-frame SKIP simply advances the pixel cursor.
+- Changed pixels are written directly to the corresponding VRAM positions.
+- No second full-size RAM framebuffer is required.
+- The LCD SHOULD be refreshed after the complete frame has been decoded.
+
+If the player applies scaling, rotation, cropping, overlays, or a display mapping that cannot act as a stable reference surface, it MUST use another persistent image buffer or an equivalent reconstruction surface.
+
+### 15.5 Display timing
+
+The player SHOULD schedule frame presentation using `duration_ms`.
+
+The target playback rate is 10 FPS. The decoder should complete each frame within its presentation interval.
+
+If decoding falls behind, the player MAY skip displaying overdue frames, but it MUST still reconstruct every dependent frame in order. It MUST NOT discard a P-frame's updates if a later P-frame depends on them.
 
 ---
 
-## 16. Validation and error handling
+## 16. Keyframe seeking
 
-A decoder MUST reject malformed files safely. It MUST NOT read beyond the file, frame payload, palette, or index.
+The index allows the player to seek without decoding from the beginning.
 
-At minimum, the decoder MUST validate:
+The decoder SHOULD load the keyframe index at startup if memory permits. If it does not, it MAY read index entries on demand.
 
-### File-level validation
+For a target time:
+
+1. Find the nearest preceding keyframe.
+2. Seek to its absolute file offset.
+3. Decode its complete I-frame.
+4. Decode every subsequent stored frame required to reach the target interval.
+5. Display the image valid at the target time.
+
+The maximum dependency interval limits how much decoding is needed after a keyframe.
+
+---
+
+## 17. Validation and error handling
+
+A decoder MUST reject malformed files safely and MUST NOT read beyond the file, palette, frame payload, or index.
+
+### 17.1 File-level checks
 
 - Magic and version.
 - Header size and reserved fields.
-- Width, height, frame rate, frame count, and palette count.
-- Palette and frame offsets.
-- Index offset and file bounds.
-- Palette length.
-- Exact end-of-file after the index.
+- Width, height, FPS, frame count, and palette count.
+- Palette offset and frame offset.
+- Index offset and actual file bounds.
+- Palette byte count.
+- Total duration.
+- File size below the 4 GiB v1 limit.
 
-### Frame-level validation
+### 17.2 Frame-level checks
 
 - Frame magic `FRM1`.
 - Frame type is I or P.
-- Flags and header size.
-- Sequential frame number.
-- Positive frame duration.
-- Payload size and file bounds.
+- Flags are zero.
+- Header size is 20.
+- Frame number is sequential.
+- Duration is positive.
+- Payload size is inside the file and before the index.
 - First frame is an I-frame.
-- A P-frame has a preceding successfully decoded frame.
+- A P-frame has a previously decoded reference image.
 
-### Packet-level validation
+### 17.3 Packet-level checks
 
-- Opcode is valid (all four two-bit values are defined in v1).
-- Extended lengths are in the defined range.
-- Packet data is fully present.
+- Packet header is complete.
+- Long run length is 33–8,191.
+- Packet payload is fully present.
 - Palette indices are valid.
 - SKIP is not used in an I-frame.
-- Pixel coverage equals exactly `width × height`.
-- Payload is consumed exactly.
+- Packet coverage equals exactly `width × height`.
+- Packet payload is consumed exactly.
 
-### Index-level validation
+### 17.4 Index-level checks
 
 - Magic is `IDX1`.
-- Entry count is plausible for the file size.
-- Every entry references a valid I-frame.
+- Entry count is consistent with the index size.
+- Each entry points to a valid I-frame.
 - Entries are strictly ordered.
-- The first entry references frame zero and elapsed time zero.
+- First entry references frame zero and elapsed time zero.
 - Every I-frame has exactly one index entry.
+- Index ends exactly at end-of-file.
 
-On any decoding error, the player SHOULD stop playback and display a useful error. It MUST NOT continue with a partially reconstructed frame as if it were valid.
+On an error, the player SHOULD stop playback and report a useful message. It MUST NOT continue as if a partially reconstructed frame were valid.
 
 ---
 
-## 17. Performance considerations for the fx-CP400
+## 18. Memory and performance considerations
 
-The decoder is intentionally designed around simple operations:
-
-- Sequential reads.
-- Byte and 16-bit little-endian loads.
-- Palette lookups.
-- 16-bit framebuffer writes.
-- Repeated-value writes.
-- Cursor increments.
-- No recursion.
-- No floating-point operations.
-- No per-pixel nearest-colour search.
-- No motion search.
-
-For the maximum 528 × 320 RGB565 frame, one framebuffer requires:
+At maximum resolution, one RGB565 image requires:
 
 `528 × 320 × 2 = 337,920 bytes`
 
-This is approximately 330 KiB. A second framebuffer is optional and requires another 337,920 bytes.
+This is approximately 330 KiB.
 
-The global palette requires at most 512 bytes.
+The palette requires at most 512 bytes. The packet decoder itself requires only a small amount of state.
 
-The decoder SHOULD use buffered sequential file reads. Reading every packet or pixel through a separate filesystem call is strongly discouraged.
+The calculator implementation SHOULD:
 
-The desktop encoder and calculator decoder have different goals. The encoder may perform palette analysis, lookahead, and rate-distortion decisions. None of those operations are required on the calculator.
+- Use buffered sequential reads.
+- Avoid a nearest-colour search on the calculator.
+- Avoid floating-point operations.
+- Avoid recursion.
+- Avoid allocation per packet or per pixel.
+- Avoid copying the full framebuffer between frames when the reference surface can be updated in place.
+- Use direct LCD VRAM as the reference surface when its layout permits.
+- Refresh the display once per complete frame rather than once per pixel.
+
+The desktop encoder and calculator decoder have different responsibilities. Palette generation, lookup-table creation, rate-distortion decisions, and packet optimisation happen on the desktop. The calculator only applies the stored decisions.
 
 ---
 
-## 18. Compatibility and versioning
+## 19. Compatibility and versioning
 
-A file conforming to this document MUST use:
+CPV v1 requires:
 
 - Major version 1.
 - Minor version 0.
-- The exact 80-byte v1 header.
-- The exact 20-byte v1 frame header.
+- A 64-byte file header.
+- A 20-byte frame header.
 - The four packet opcodes defined in Section 10.
-- The `IDX1` keyframe index.
+- The packet-length encoding defined in Section 10.1.
+- An `IDX1` index at the end of the file.
 
-A v1 decoder MUST reject unknown major versions.
+A decoder MUST reject unknown major versions.
 
-A decoder MAY reject minor versions greater than the highest minor version it supports. A v1.0 decoder MUST reject non-zero reserved fields and flags rather than silently assuming unknown semantics.
-
-Any future change that alters packet meaning, frame reconstruction, or required header layout requires a new major version.
+A strict v1.0 decoder MUST reject a non-zero reserved field or flag. Any future change that alters packet semantics, reconstruction rules, or required header layout requires a new major version.
 
 ---
 
-## 19. Recommended encoder command-line interface
+## 20. Recommended host converter interface
 
 The command-line interface is not part of the binary format, but the host converter SHOULD provide a stable interface similar to:
 
@@ -928,119 +1039,156 @@ Recommended options:
 | `--height` | Output height, 1–320 |
 | `--fps` | Nominal output frame rate, up to 30 |
 | `--quality` | Encoder quality policy, 0–100 |
-| `--keyframe-interval` | Keyframe target interval; default 1 second |
+| `--keyframe-interval` | Keyframe target; default 2 seconds |
 | `--fit contain` | Preserve aspect ratio with letterboxing |
-| `--fit stretch` | Stretch to the exact output dimensions |
+| `--fit stretch` | Stretch to exact output dimensions |
 
-The normal calculator profile is 528 × 320 at 10 FPS. Lower resolutions and frame rates SHOULD be encouraged when they provide a useful quality-to-size improvement.
+The normal target profile is 528 × 320 at 10 FPS. Lower resolutions and frame rates SHOULD be offered as useful size-saving options.
 
 ---
 
-## 20. Conformance test vectors and required tests
+## 21. Required implementation tests
 
-A CPV v1 implementation SHOULD include tests for all packet types and all structural boundaries.
+A CPV v1 implementation SHOULD test every packet type and boundary.
 
-### 20.1 Packet tests
+### 21.1 Packet tests
 
-- INDEX_LITERAL with one, 63, 64, and 65,535 pixels.
-- INDEX_REPEAT with one, 63, 64, and 65,535 pixels.
-- SKIP with one, 63, 64, and 65,535 pixels in a P-frame.
-- RAW565 with one, 63, 64, and 65,535 pixels.
-- A run longer than 65,535 pixels split across multiple packets.
+- Short packets with lengths 1, 2, and 32.
+- Long packets with lengths 33, 255, 256, and 8,191.
+- Runs longer than 8,191 split across multiple packets.
+- INDEX_LITERAL with varied palette indices.
+- INDEX_REPEAT with a single palette index.
+- SKIP in a P-frame.
+- RAW565 with known little-endian RGB565 values.
+- Invalid long lengths below 33.
+- Truncated short and long headers.
+- Truncated literal, repeat, and RAW565 payloads.
 - Invalid palette indices.
-- Truncated short and extended packets.
-- Invalid extended lengths.
 - SKIP in an I-frame.
-- Packet streams that cover too few or too many pixels.
+- Packet streams with too few or too many pixels.
 
-### 20.2 Frame tests
+### 21.2 Frame tests
 
-- A one-pixel I-frame.
-- A complete I-frame using only INDEX_LITERAL.
-- An I-frame using INDEX_REPEAT and RAW565.
+- A 1 × 1 I-frame.
+- Maximum 528 × 320 I-frame.
+- An I-frame using INDEX_LITERAL and INDEX_REPEAT.
+- An I-frame using RAW565.
 - A P-frame that uses only SKIP.
 - A P-frame that changes one pixel.
-- A P-frame that changes a long contiguous range.
-- A P-frame that mixes SKIP, INDEX_LITERAL, INDEX_REPEAT, and RAW565.
-- A scene change followed by a new I-frame.
+- A P-frame mixing all valid packet types.
+- Consecutive identical source frames coalesced into a longer duration.
+- A scene change followed by an I-frame.
 - Variable frame durations.
 
-### 20.3 File tests
+### 21.3 File tests
 
-- Minimum valid dimensions: 1 × 1.
-- Maximum dimensions: 528 × 320.
-- Minimum palette count: 1.
-- Maximum palette count: 256.
-- Missing index.
+- Minimum and maximum dimensions.
+- Palette counts 1 and 256.
 - Invalid offsets.
 - Invalid frame count.
-- Missing first I-frame.
+- Missing initial I-frame.
 - Missing keyframe index entry.
 - Unsorted index entries.
-- Extra bytes after the index.
 - Incorrect total duration.
-- Unsupported version and non-zero reserved fields.
+- Extra bytes after index.
+- Non-zero reserved fields.
+- Unsupported version.
+- Truncated frame header and payload.
+- Files at and beyond the 4 GiB representable boundary.
 
-### 20.4 Round-trip tests
+### 21.4 Round-trip tests
 
-For every generated test file:
+For each generated test:
 
-1. Encode the source frames.
-2. Decode the resulting CPV file with the host decoder.
-3. Compare the decoded RGB565 frames with the encoder's reconstructed frames.
-4. Require exact equality for every decoded pixel.
-5. Seek to every keyframe and verify that sequential decoding from that point produces the same frames as decoding from the beginning.
+1. Encode source frames.
+2. Decode the generated CPV file.
+3. Compare decoded RGB565 images with the encoder's reconstructed images.
+4. Require exact pixel equality.
+5. Seek to every I-frame and verify that decoding from that keyframe produces the same images as decoding from the beginning.
 
-For quality 100, the encoder SHOULD also verify that decoded pixels match the source after RGB565 conversion.
-
----
-
-## 21. Design rationale
-
-### 21.1 Why one global palette?
-
-A global palette is stored once instead of repeating palette definitions for every tile. It also allows one lookup table to be reused for every frame.
-
-This is particularly useful for a calculator decoder with limited memory and CPU resources.
-
-### 21.2 Why linear packets instead of tiles?
-
-The decoder does not need to manage tile coordinates, split trees, local palette headers, or recursive traversal.
-
-A packet only needs to know its run length and operation. It can update the framebuffer with a simple pointer and counter.
-
-### 21.3 Why INDEX_LITERAL?
-
-A repeat-only RLE stream handles long runs of one colour well, but it is inefficient when many adjacent changed pixels have different colours.
-
-INDEX_LITERAL stores an entire sequence of indices behind one packet header. This avoids the per-pixel packet overhead of a repeat-only representation.
-
-### 21.4 Why RAW565?
-
-A fixed palette cannot represent every RGB565 colour in a complex photographic frame.
-
-RAW565 lets the encoder preserve selected detail without making the complete file uncompressed. The encoder can use it only where the quality benefit justifies the additional bytes.
-
-### 21.5 Why no motion vectors in v1?
-
-Motion estimation and compensation would increase encoder complexity and decoder work. The linear delta stream already captures exact unchanged pixels and repeated values with little decoder overhead.
-
-Motion compensation may be revisited only after the simpler codec has been benchmarked on representative material.
+For quality 100, decoded output SHOULD exactly match the source after RGB565 conversion.
 
 ---
 
-## 22. Implementation acceptance criteria
+## 22. Design rationale and relationship to the legacy CPV player
 
-The CPV v1 implementation is considered ready for calculator integration when all of the following are true:
+The original CPV player demonstrated that a global palette combined with linear delta coding can be compact and practical on the fx-CP400. CPV v1 intentionally retains that architecture instead of replacing it with a more complicated tile codec.
 
-- The host encoder writes only files conforming to this specification.
-- The host decoder validates and decodes every defined packet type.
-- Encoder and decoder reconstruct identical RGB565 framebuffers.
-- Keyframe seeking produces identical output to sequential decoding.
-- Files with malformed headers, packets, or indices fail safely.
-- The calculator decoder performs no dynamic memory allocation per pixel.
-- Sequential file reading is buffered.
-- Playback reaches the 10 FPS target at the intended device resolution for the selected test profile.
-- Encoder benchmarks report conversion time, output size, dimensions, frame rate, and quality setting.
+### 22.1 Improvements over the legacy packet stream
 
-The final compression and playback targets MUST be established using repeatable test clips. File size alone is not a meaningful comparison unless source material, output resolution, frame rate, duration, and visual quality are held constant.
+The legacy format primarily represented changed pixels as repeated single-index runs, alongside SKIP runs. This works well for flat areas but creates many small packets when adjacent changed pixels have different colours.
+
+CPV v1 adds INDEX_LITERAL. A mixed sequence can now be stored as one packet containing consecutive palette indices. This is particularly useful for detailed animation, photographic texture, and gameplay.
+
+The v1 packet header also defines short and long runs for four packet types, with 1-byte headers for runs up to 32 pixels and 2-byte headers up to 8,191 pixels.
+
+### 22.2 Explicit keyframes
+
+The legacy stream relied on the initial display state and did not define a robust random-access index. CPV v1 requires the first frame to initialise every pixel and periodically inserts complete I-frames.
+
+This removes dependence on an assumed initial screen colour and enables bounded seeking.
+
+### 22.3 Safer sizes and dimensions
+
+The legacy header used one-byte width and height fields and a 16-bit frame-size field. Those limits are not sufficient for the 528 × 320 target.
+
+CPV v1 uses 16-bit dimensions and a 32-bit payload size. It also validates offsets, frame boundaries, and index entries.
+
+### 22.4 Faster encoder mapping
+
+A straightforward nearest-palette search performs up to 256 colour comparisons for every pixel. CPV v1 recommends a 65,536-byte RGB565-to-index lookup table built once per conversion.
+
+The table replaces repeated palette searches with one array lookup per pixel.
+
+### 22.5 Streaming conversion
+
+An encoder SHOULD write completed frame records directly to a temporary output file. It SHOULD NOT accumulate the complete compressed video in a growing memory buffer.
+
+This avoids unbounded memory growth and repeated large reallocations during long conversions.
+
+### 22.6 Simple calculator decoding
+
+The calculator does not need to build palettes, perform nearest-colour searches, analyse motion, or optimise packet choices.
+
+Its main loop performs only:
+
+- Read packet header.
+- Determine opcode and run length.
+- Read indices or RGB565 values as needed.
+- Write pixels or advance over unchanged pixels.
+- Update the persistent reference image.
+
+Where the LCD VRAM can retain the image in the correct RGB565 layout, it can serve as that reference image and avoid an extra full-frame RAM buffer.
+
+---
+
+## 23. Benchmarking and acceptance criteria
+
+Compression results MUST be evaluated using equivalent source material and equivalent output settings.
+
+A meaningful comparison records:
+
+- Exact source file and source duration.
+- Output width and height.
+- Output frame rate.
+- Encoder quality setting and palette count.
+- Keyframe interval.
+- Output file size.
+- Conversion wall-clock time.
+- Average and peak decode time per frame.
+- Visual quality of representative scenes.
+
+The 10 FPS target is a performance goal, not a guaranteed result.
+
+A CPV v1 implementation is ready for calculator integration when:
+
+- The encoder writes files conforming to this specification.
+- The host decoder handles all four packet types.
+- Encoder and decoder reconstruct identical RGB565 frames.
+- Keyframe seeking produces the same output as sequential decoding.
+- Malformed files fail safely.
+- The calculator decoder performs no dynamic allocation per pixel or packet.
+- File reads are buffered.
+- 10 FPS playback is demonstrated on representative test clips at the chosen output profile.
+
+File size alone is not a fair comparison. Resolution, FPS, duration, source material, and visual quality must be held constant before comparing CPV versions or encoders.
