@@ -35,7 +35,7 @@ Run:
 make -C ui/tests clean host-test
 ~~~
 
-The host tests use mocked SDK calls and cover path normalization, file/directory wrappers, settings, framebuffer drawing and clipping, and normalized input events. They do not replace testing on the calculator.
+The host tests use mocked SDK calls and cover path normalization, file/directory wrappers, setting factories, keyed settings serialization and legacy migration parsing, framebuffer drawing and clipping, and normalized input events. They do not replace testing on the calculator.
 
 ## Display lifecycle
 
