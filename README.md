@@ -21,51 +21,56 @@ the files in this repository do not replace it.
 
 ## Optional runtime binaries from this repository
 
-Prebuilt files, when published, are available on the
-[Hollyhock 2.1 Releases page](https://github.com/friedrichOsDev/hollyhock-2.1/releases).
-They are optional add-ons to an already installed Hollyhock 2 system:
+The first prebuilt release, [Hollyhock 2.1 — v2.1](https://github.com/friedrichOsDev/hollyhock-2.1/releases/tag/v2.1),
+is available on the [Releases page](https://github.com/friedrichOsDev/hollyhock-2.1/releases).
+It contains two optional binaries for an already installed Hollyhock 2 system:
 
-- **`run.bin` — updated launcher:** copy this file to the root of the
-  calculator's `fls0` storage and replace the existing `run.bin`. Keep a
-  backup of the original file so you can restore it.
-- **`python.bin` — optional companion binary:** copy it to the same location
-  only if you want to use the Python-related functionality supplied with that
-  release. It is an additional file; it does not replace `run.bin`.
-- **Other optional binaries:** some releases may include additional helper or
-  companion files. Install only the files you need and follow the notes for
-  that particular release. Do not overwrite unrelated calculator files.
+- **[`run.bin`](https://github.com/friedrichOsDev/hollyhock-2.1/releases/download/v2.1/run.bin) — updated launcher:** replaces the existing `run.bin` in the root of the calculator's `fls0` storage. Back up the original file before replacing it.
+- **[`python.bin`](https://github.com/friedrichOsDev/hollyhock-2.1/releases/download/v2.1/python.bin) — MicroPython port:** an optional additional binary. Copy it to the same `fls0` root if you want to use the MicroPython port; it does not replace `run.bin`.
 
-You do not need to install every optional binary. The original Hollyhock 2
-installation remains the required base; the updated `run.bin` and any
-companion binaries are optional replacements/additions.
+### Installing the v2.1 binaries
 
-**Release availability:** no prebuilt GitHub Release is published yet. The
-Releases page above is where future packaged binaries will be provided. Until
-then, the launcher can be built from source with `./launcher/build.sh`.
+Complete the original Hollyhock 2 installation above first. Then:
+
+1. Download `run.bin` from the v2.1 release and connect the calculator in USB Storage mode.
+2. Back up the existing `fls0/run.bin` on your computer.
+3. Copy the new `run.bin` into the root of `fls0`, replacing the old launcher.
+4. To add the MicroPython port, also copy `python.bin` into the root of `fls0`. This step is optional.
+5. Safely eject the calculator and start Hollyhock as usual.
+
+You can use the updated launcher without installing `python.bin`. The original
+Hollyhock 2 installation remains the required base; these release binaries are
+optional replacements/additions. You do not need to install the SDK or UI
+library separately on the calculator.
+
+Future releases may provide additional companion files. Install only the
+files you need and follow the instructions for that specific release; do not
+overwrite unrelated calculator files.
 
 ## Development: updated SDK and UI library
 
-This repository also contains an updated Hollyhock SDK and the optional
-**Hollyhock UI Library**. These are development tools for compiling your own
-fx-CP400 applications; they are not required just to install or use the
-launcher.
+This repository also contains an updated Hollyhock SDK and the
+**Hollyhock UI Library**. These are development components for building your
+own fx-CP400 applications. They are separate from the prebuilt runtime
+binaries above and are not needed just to install or use them.
 
-The `app_template/` project is the recommended starting point and already
-demonstrates how to use both the updated SDK and UI library. Its build script
-builds the SDK, builds the UI library, and then compiles the example
-application:
+The `app_template/` project is the recommended starting point. It includes a
+demo application and shows how to use both the updated SDK and UI library.
+From the repository root, build all three components with:
 
 ```sh
 ./app_template/build.sh
 ```
 
-This produces `app_template/app_template.hhk` and
-`app_template/app_template.bin`. Copy the desired application file to the
-calculator's `fls0` root and launch it using Hollyhock.
+The script builds the SDK, then the UI library, and finally the example
+application. It produces `app_template/app_template.hhk` and
+`app_template/app_template.bin`. Copy the application format you want to use
+to the calculator's `fls0` root and launch it using Hollyhock.
 
-You need the SH-4 cross-toolchain used by the SDK, GNU Make, and Bash. To start
-your own project, use `app_template/` as a base, adjust its source and build
-configuration, and link the SDK and UI library as shown in its Makefile.
+Building requires the SH-4 cross-toolchain used by the SDK, GNU Make, and Bash.
+To create your own application, start with `app_template/`, adapt its source
+and build configuration, and link the SDK and UI library as shown in its
+Makefile.
 
 - [UI Library guide](doc/ui-library/README.md)
 - [UI Library getting started](doc/ui-library/getting-started.md)
