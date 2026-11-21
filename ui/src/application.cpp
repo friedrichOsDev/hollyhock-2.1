@@ -803,6 +803,36 @@ int Application::SetCurrentDirectory(const char *path) {
     return 0;
 }
 
+Setting *Application::GetSettings() {
+    return m_config.settings;
+}
+
+int Application::GetSettingCount() const {
+    return m_config.settingCount;
+}
+
+int Application::AdjustSetting(int index, int direction) {
+    if (!m_config.settings || index < 0 ||
+        index >= m_config.settingCount)
+        return EINVAL;
+
+    Setting &setting = m_config.settings[index];
+    if (!ValidSettingDefinition(setting))
+        return EINVAL;
+
+    Adjust(setting, *this, direction < 0 ? -1 : 1);
+    if (m_settingsStore.IsOpen()) {
+        m_persistenceReady = true;
+        SaveSettingsToStorage();
+    }
+    return m_persistenceResult;
+}
+
+bool Application::FileMatchesFilter(const char *filename) const {
+    return FileFilterMatches(filename, m_config.filters,
+                             m_config.filterCount);
+}
+
 bool Application::IsRunning() const {
     return m_state != StateExit;
 }
