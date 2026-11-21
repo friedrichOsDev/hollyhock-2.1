@@ -1011,11 +1011,7 @@ void Application::RunNativeSettings() {
         else if (event >= E_ROW && event < E_ROW + ROWS) {
             const int index = page * ROWS + event - E_ROW;
             if (index < m_config.settingCount) {
-                Adjust(m_config.settings[index], *this);
-                if (m_settingsStore.IsOpen()) {
-                    m_persistenceReady = true;
-                    SaveSettingsToStorage();
-                }
+                AdjustSetting(index, 1);
             }
             if (m_state != StateSettings) done = true;
         }
@@ -1594,18 +1590,13 @@ bool Application::RunFramebufferSettings() {
 
         Setting &setting = m_config.settings[selected];
         if (adjustment != 0 && setting.type != SettingAction)
-            Adjust(setting, *this, adjustment);
+            AdjustSetting(selected, adjustment);
         else if (activate)
-            Adjust(setting, *this, 1);
+            AdjustSetting(selected, 1);
 
-        if (adjustment != 0 || activate) {
-            if (m_settingsStore.IsOpen()) {
-                m_persistenceReady = true;
-                SaveSettingsToStorage();
-            }
-            if (m_state != StateSettings)
-                done = true;
-        }
+        if ((adjustment != 0 || activate) &&
+            m_state != StateSettings)
+            done = true;
     }
 
     screen.End();
