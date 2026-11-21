@@ -46,6 +46,17 @@ bool EqualKey(const char *left, const char *right) {
     return left[i] == right[i];
 }
 
+bool EqualKeyRange(const char *left, const char *right,
+                   unsigned int length) {
+    if (!left || !right)
+        return false;
+    for (unsigned int i = 0; i < length; ++i) {
+        if (left[i] != right[i])
+            return false;
+    }
+    return true;
+}
+
 bool AddChar(char *output, int *position, char value) {
     if (*position >= PersistenceBufferSize - 1)
         return false;
@@ -265,7 +276,7 @@ bool ParseKeyedSettings(const char *data, const Setting *settings,
         return false;
     }
 
-    char seenKeys[MaxPersistentSettings][MaxSettingKeyLength + 1];
+    const char *seenKeyPointers[MaxPersistentSettings];
     unsigned int seenLengths[MaxPersistentSettings];
     int values[MaxPersistentSettings];
     bool hasValue[MaxPersistentSettings];
@@ -279,7 +290,7 @@ bool ParseKeyedSettings(const char *data, const Setting *settings,
             return false;
         }
 
-        char key[MaxSettingKeyLength + 1];
+        const char *key = position;
         for (unsigned int i = 0; i < keyLength; ++i) {
             if (!position[i])
                 return false;
@@ -287,19 +298,16 @@ bool ParseKeyedSettings(const char *data, const Setting *settings,
                 static_cast<unsigned char>(position[i]);
             if (character < 32 || character > 126)
                 return false;
-            key[i] = position[i];
         }
-        key[keyLength] = 0;
         position += keyLength;
 
         for (unsigned int previous = 0; previous < entry; ++previous) {
             if (seenLengths[previous] == keyLength &&
-                EqualKey(seenKeys[previous], key)) {
+                EqualKeyRange(seenKeyPointers[previous], key, keyLength)) {
                 return false;
             }
         }
-        for (unsigned int i = 0; i <= keyLength; ++i)
-            seenKeys[entry][i] = key[i];
+        seenKeyPointers[entry] = key;
         seenLengths[entry] = keyLength;
 
         const char storedType = *position++;
@@ -320,7 +328,11 @@ bool ParseKeyedSettings(const char *data, const Setting *settings,
             return false;
         }
 
-        const int settingIndex = FindSetting(key, settings, count);
+        char terminatedKey[MaxSettingKeyLength + 1];
+        for (unsigned int i = 0; i < keyLength; ++i)
+            terminatedKey[i] = key[i];
+        terminatedKey[keyLength] = 0;
+        const int settingIndex = FindSetting(terminatedKey, settings, count);
         if (settingIndex < 0)
             continue;
 
