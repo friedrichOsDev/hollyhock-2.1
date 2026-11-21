@@ -67,4 +67,7 @@ $(UI_DIR)/ui.o:
 	$(CXX) -c $< -o $@ $(CXX_FLAGS)
 	@$(READELF) $@ -S | grep ".ctors" > /dev/null && echo "ERROR: Global constructors aren't supported." && rm $@ && exit 1 || exit 0
 
+# Rebuild both demo translation units when their shared declarations change.
+main.o demo/demo.o: demo/demo.hpp
+
 .PHONY: bin hhk all clean
