@@ -44,20 +44,37 @@ void FormatUnsigned(unsigned int value, char *output, int capacity) {
     char reversed[12];
     int count = 0;
     do {
-        unsigned int reduced = value;
-        unsigned int digit = 0;
-        while (reduced >= 10U) {
-            reduced -= 10U;
-            ++digit;
+        // Fixed-width binary long division by ten. This avoids emitting
+        // SH-4 libgcc divide helpers in the freestanding demo executable.
+        unsigned int quotient = 0;
+        unsigned int remainder = 0;
+        for (int bit = 31; bit >= 0; --bit) {
+            remainder = (remainder << 1) | ((value >> bit) & 1U);
+            quotient <<= 1;
+            if (remainder >= 10U) {
+                remainder -= 10U;
+                quotient |= 1U;
+            }
         }
-        reversed[count++] = static_cast<char>('0' + reduced);
-        value = digit;
+        reversed[count++] = static_cast<char>('0' + remainder);
+        value = quotient;
     } while (value != 0U && count < (int)sizeof(reversed));
 
     int index = 0;
     while (count > 0 && index < capacity - 1)
         output[index++] = reversed[--count];
     output[index] = 0;
+}
+
+int DivideNonNegative(int value, int divisor) {
+    if (value <= 0 || divisor <= 0)
+        return 0;
+    int quotient = 0;
+    while (value >= divisor) {
+        value -= divisor;
+        ++quotient;
+    }
+    return quotient;
 }
 
 void FormatSigned(int value, char *output, int capacity) {
@@ -421,7 +438,7 @@ void DemoStart(UI::Application &app) {
             }
         } else if (event.type == UI::EventTouch &&
                    event.touchAction == UI::TouchDown) {
-            const int row = (event.y - 76) / 38;
+            const int row = DivideNonNegative(event.y - 76, 38);
             if (event.y >= 76 && row >= 0 && row < DEMO_ROWS) {
                 selected = row;
                 activate = true;
@@ -494,8 +511,9 @@ void DemoFileSelected(UI::Application &app, const char *path) {
                 requested = 8;
             if (requested > PREVIEW_BUFFER_SIZE - 1)
                 requested = PREVIEW_BUFFER_SIZE - 1;
-            const int bytesToRead = Min(
-                static_cast<int>(Min(fileSize, 0x7FFFFFFFU)), requested);
+            int bytesToRead = requested;
+            if (fileSize < static_cast<uint32_t>(requested))
+                bytesToRead = static_cast<int>(fileSize);
             bytesRead = file.Read(preview, bytesToRead);
             if (bytesRead >= 0 && bytesRead <= bytesToRead) {
                 preview[bytesRead] = 0;
@@ -611,11 +629,17 @@ void DemoCustomSettings(UI::Application &app) {
             }
         } else if (event.type == UI::EventTouch &&
                    event.touchAction == UI::TouchDown) {
-            const int row = (event.y - 76) / 34;
             const int visible = Min(count, 5);
-            if (event.y >= 76 && row >= 0 && row < visible) {
-                selected = row;
-                activate = true;
+            if (event.y >= 76 && event.y < 76 + visible * 34) {
+                const int row = DivideNonNegative(event.y - 76, 34);
+                if (row >= 0 && row < visible) {
+                    selected = row;
+                    activate = true;
+                }
+            } else if (event.y >= screen.Height() - 30) {
+                screen.End();
+                app.ReturnToMenu();
+                return;
             }
         }
 
