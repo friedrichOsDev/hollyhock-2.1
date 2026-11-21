@@ -11,7 +11,7 @@ APP_VERSION("2.0")
 DemoSettings g_demoSettings = {
     true,   // showPreview
     32,     // previewBytes
-    0,      // letterCase
+    0,      // previewFormat
     true    // showFileSize
 };
 
@@ -52,10 +52,9 @@ extern "C" void main() {
     config.filters = filters;
     config.filterCount = sizeof(filters) / sizeof(filters[0]);
 
-    const char *const letterCaseOptions[] = {
-        "Original",
-        "Uppercase",
-        "Lowercase"
+    const char *const previewFormatOptions[] = {
+        "Text",
+        "Hexadecimal"
     };
     UI::Setting settings[] = {
         UI::Setting::Boolean(
@@ -65,8 +64,9 @@ extern "C" void main() {
             "Preview bytes", &g_demoSettings.previewBytes,
             8, 64, 8, "Number of bytes read from the start of a file"),
         UI::Setting::Enumeration(
-            "Letter case", &g_demoSettings.letterCase,
-            letterCaseOptions, 3, "Change the displayed preview letter case"),
+            "Preview format", &g_demoSettings.previewFormat,
+            previewFormatOptions, 2,
+            "Display selected bytes as text or hexadecimal"),
         UI::Setting::Boolean(
             "Show file size", &g_demoSettings.showFileSize,
             "Display the selected file size"),
