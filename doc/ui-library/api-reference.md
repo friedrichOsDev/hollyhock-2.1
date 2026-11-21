@@ -20,12 +20,36 @@ public:
     void ReturnToMenu();
     void OpenFileSelector();
     void OpenSettings();
+    int SelectFile(const char *path);
+    const char *CurrentDirectory() const;
+    int SetCurrentDirectory(const char *path);
     bool IsRunning() const;
     int SettingsPersistenceResult() const;
 };
 ~~~
 
 Application is non-copyable. SettingsPersistenceResult() returns zero on success or the latest MCS persistence error.
+
+~~~cpp
+enum class MenuRenderer {
+    Native,
+    Framebuffer,
+    Custom
+};
+~~~
+
+Each menu has an independent renderer selection:
+
+| Config member | Type | Default |
+| --- | --- | --- |
+| mainMenuRenderer | MenuRenderer | Native |
+| fileSelectorRenderer | MenuRenderer | Native |
+| settingsRenderer | MenuRenderer | Native |
+| onCustomMainMenu | ActionCallback | null |
+| onCustomFileSelector | ActionCallback | null |
+| onCustomSettings | ActionCallback | null |
+
+Custom callbacks own the drawing and event loop. Lifecycle and persistence remain managed by Application. Missing custom callbacks fall back to Native.
 
 ## Config
 
