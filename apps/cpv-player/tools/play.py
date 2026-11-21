@@ -149,6 +149,8 @@ class CPVFile:
             raise CPVError("frames_offset does not immediately follow the global palette")
         if not (frames_offset < index_offset <= self.file_size - INDEX_HEADER.size):
             raise CPVError("index_offset is outside the valid frame/index region")
+        if self.frame_count > (index_offset - frames_offset) // FRAME_HEADER.size:
+            raise CPVError("frame_count cannot fit in the declared frame-record region")
 
         raw_palette = self._read_exact_at(
             palette_offset, self.palette_count * 2, "global RGB565 palette"
@@ -181,6 +183,7 @@ class CPVFile:
         # Parse the frame sequence and independently reconstruct the expected index.
         position = frames_offset
         elapsed_ms = 0
+        last_keyframe_elapsed = 0
         expected_entries: list[tuple[int, int, int]] = []
         for number in range(self.frame_count):
             if position > index_offset or FRAME_HEADER.size > index_offset - position:
@@ -207,6 +210,12 @@ class CPVFile:
                 raise CPVError(f"frame {number} has zero duration")
             if number == 0 and frame_type != FRAME_I:
                 raise CPVError("the first frame must be an I-frame")
+            if frame_type == FRAME_I:
+                last_keyframe_elapsed = elapsed_ms
+            elif elapsed_ms - last_keyframe_elapsed > 10000:
+                raise CPVError(
+                    f"frame {number} exceeds the maximum 10-second keyframe dependency interval"
+                )
 
             payload_offset = position + FRAME_HEADER.size
             if payload_offset > index_offset or payload_size > index_offset - payload_offset:
@@ -500,23 +509,26 @@ class CPVPlayer:
         self.remaining_ms = record.duration_ms
         self._render()
 
-    def _schedule_next(self, delay_ms: int) -> None:
+    def _schedule_next(self, delay_ms: int, base_deadline: Optional[float] = None) -> None:
         if self.after_id is not None:
             self.root.after_cancel(self.after_id)
             self.after_id = None
         delay_ms = max(1, int(delay_ms))
-        self.remaining_ms = delay_ms
-        self.deadline = time.monotonic() + delay_ms / 1000.0
-        self.after_id = self.root.after(delay_ms, self._advance)
+        base = time.monotonic() if base_deadline is None else base_deadline
+        self.deadline = base + delay_ms / 1000.0
+        wait_ms = max(1, round((self.deadline - time.monotonic()) * 1000))
+        self.remaining_ms = wait_ms
+        self.after_id = self.root.after(wait_ms, self._advance)
 
     def _advance(self) -> None:
         self.after_id = None
         if not self.playing or self.closed:
             return
+        previous_deadline = self.deadline
         try:
             self.show_next_frame()
             if self.playing:
-                self._schedule_next(self.remaining_ms)
+                self._schedule_next(self.remaining_ms, base_deadline=previous_deadline)
         except (CPVError, OSError) as exc:
             self.pause_playback()
             self.messagebox.showerror("CPV decoding error", str(exc), parent=self.root)
