@@ -1,36 +1,46 @@
 # Hollyhock UI Library
 
-A small C++ application-menu and read-only file-system helper library for the fx-CP400, built on top of this repository's Hollyhock 2.1 SDK. It also provides an MCS (Calc Vars) storage wrapper and optional automatic persistence for built-in settings.
+A small C++ application-menu, direct LCD framebuffer, input, read-only file-system, and persistent MCS storage library for the fx-CP400.
 
 ## Full documentation
 
-See ../doc/ui-library/README.md for the complete guide, including build instructions, application menus, settings persistence, the read-only file API, and current limitations.
+See ../doc/ui-library/README.md for the complete guide.
 
 ## Quick build
-
-From the repository root:
 
 ~~~sh
 make -C sdk
 make -C ui SDK_DIR=../sdk
 ~~~
 
-This creates sdk/sdk.o and ui/ui.o. The UI Makefile automatically includes all sources in ui/src/, including the MCS storage wrapper.
-
-Link both objects into your application and add sdk/include and ui/include to the compiler include paths. The app_template/ directory contains a complete example:
+Link sdk/sdk.o and ui/ui.o into your application and include sdk/include and ui/include. app_template/ contains a complete example:
 
 ~~~sh
 ./app_template/build.sh
 ~~~
 
+## Public APIs
+
+- ui/application.hpp — optional built-in menu, callbacks, and settings.
+- ui/framebuffer.hpp — bounded RGB565 drawing directly into LCD VRAM.
+- ui/input.hpp — normalized key, touch, system, and unknown events.
+- ui/filesystem.hpp — read-only file and directory access.
+- ui/storage.hpp — MCS-backed PersistentStore.
+
 ## Host API tests
 
-Run `make -C ui/tests host-test` from the repository root. The host tests cover path normalization, file and directory wrappers, read-only open flags, filters, setting factories, and configuration defaults. They mock the SDK file-system calls and do not replace testing on the calculator.
+Run:
 
-## Demo application
+~~~sh
+make -C ui/tests clean host-test
+~~~
 
-The demo is read-only for file-system access. It demonstrates root-directory enumeration, the built-in filtered file selector, file metadata, read/seek operations, and configurable text previews. Its built-in settings are stored in the UIDEMO MCS folder.
+The host tests use mocked SDK calls and cover path normalization, file/directory wrappers, settings, framebuffer drawing and clipping, and normalized input events. They do not replace testing on the calculator.
 
-## SDK boundary
+## Display lifecycle
 
-The UI file-system wrapper is intentionally read-only. This does not remove or change any lower-level file-system functions from the Hollyhock SDK.
+Framebuffer requires the LCD lifecycle to be initialized. Normally create it inside an Application callback. It does not own or restore the VRAM lifecycle. The existing built-in file selector and settings remain available; set Config::showMainMenu to false to implement custom navigation.
+
+## Read-only boundary
+
+The UI file-system wrapper intentionally exposes no file-writing or file-modification API. The underlying SDK remains unchanged.

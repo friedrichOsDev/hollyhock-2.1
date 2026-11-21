@@ -60,6 +60,8 @@ struct Config {
     // Optional 1-8 character MCS folder name for automatic settings storage.
     const char *settingsFolder;
 
+    // When false, onStart is called directly instead of showing the menu.
+    bool showMainMenu;
     bool showStart;
     bool showFileSelector;
     bool showSettings;

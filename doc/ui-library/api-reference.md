@@ -1,12 +1,12 @@
 # API Reference
 
-This page summarizes the public API declared in ui/include/ui/. For longer examples, see Application Menus and Settings and the File System API.
+This page summarizes the public API declared in ui/include/ui/. For longer examples, see the application, framebuffer/input, and file-system guides.
 
 ~~~cpp
 #include <ui/ui.hpp>
 ~~~
 
-All public classes, enumerations, structures, and functions are inside the UI namespace.
+All public API declarations are inside the UI namespace.
 
 ## Application
 
@@ -29,21 +29,81 @@ Application is non-copyable. SettingsPersistenceResult() returns zero on success
 
 ## Config
 
-Important fields:
-
 | Member | Type | Default |
 | --- | --- | --- |
+| showMainMenu | bool | true |
+| showStart, showFileSelector, showSettings, showQuit | bool | true, false, false, true |
+| manageCalculatorLifecycle | bool | true |
 | settingsFolder | const char * | null |
 | settings | Setting * | null |
 | settingCount | int | 0 |
 | filters | const FileFilter * | null |
 | filterCount | int | 0 |
-| showStart, showFileSelector, showSettings, showQuit | bool | true, false, false, true |
-| manageCalculatorLifecycle | bool | true |
 
-The other fields configure menu labels and callbacks. See application.md for the full list.
+Set showMainMenu to false to call onStart directly and create a custom application screen. After the built-in file selector or settings returns, onStart is invoked again.
 
-settingsFolder enables automatic settings persistence in an MCS folder. Folder names must contain 1-8 ASCII letters or digits; they are normalized to uppercase. Use a unique stable name for each application.
+## Framebuffer
+
+~~~cpp
+typedef uint16_t Color;
+Color RGB(uint8_t red, uint8_t green, uint8_t blue);
+
+class Framebuffer {
+public:
+    Framebuffer();
+    ~Framebuffer();
+    bool Begin();
+    void End();
+    bool IsActive() const;
+    int Width() const;
+    int Height() const;
+    bool Clear(Color color);
+    bool SetPixel(int x, int y, Color color);
+    bool FillRect(int x, int y, int width, int height, Color color);
+    bool DrawRect(int x, int y, int width, int height, Color color);
+    bool DrawLine(int x1, int y1, int x2, int y2, Color color);
+    bool DrawChar(int x, int y, char character, Color color);
+    bool DrawText(int x, int y, const char *text, Color color);
+    bool Present();
+};
+~~~
+
+Framebuffer is non-copyable. It attaches to LCD VRAM and does not allocate a second buffer. Drawing modifies VRAM; Present() refreshes the display. Colors are RGB565. UI::Colors provides standard colors. The built-in 5x7 font supports printable ASCII; DrawText() processes no more than 512 input bytes.
+
+## Input
+
+~~~cpp
+enum EventType {
+    EventNone, EventKey, EventTouch, EventSystem, EventUnknown
+};
+enum KeyAction {
+    KeyActionUnknown, KeyPressed, KeyHeld, KeyReleased
+};
+enum TouchAction {
+    TouchActionUnknown, TouchDown, TouchDrag, TouchUp, TouchActionBar
+};
+
+struct Event {
+    EventType type;
+    uint16_t rawType;
+    uint16_t keyCode;
+    KeyAction keyAction;
+    int32_t x;
+    int32_t y;
+    TouchAction touchAction;
+    SystemEvent systemEvent;
+    uint32_t rawAction;
+};
+
+class Input {
+public:
+    static int Poll(Event *event);
+};
+~~~
+
+Poll() returns 1 for an event, 0 when no event is available, -1 for a null pointer, or -2 for an SDK error. Unknown event types are preserved. Touch coordinates are passed through unchanged. The wrapper exposes single-touch events, key actions, and action-bar/system events.
+
+KeyCode includes KeyUp, KeyDown, KeyLeft, KeyRight, KeyEXE, KeyPowerClear, and fx-CP400 keyboard keys. SystemEvent includes action-bar resize, swap, rotate, escape, and settings.
 
 ## Settings
 
@@ -56,13 +116,9 @@ enum SettingType {
 };
 ~~~
 
-Setting::Boolean, Setting::Integer, Setting::Enumeration, and Setting::Action create entries for the built-in settings screen.
-
-Automatic settings persistence stores Boolean, Integer, and Enumeration values and ignores Action values. It supports at most 32 entries and a serialized payload smaller than 512 bytes. Settings are loaded before the first menu is shown and saved after each selection and when Run() exits normally.
+Setting::Boolean, Setting::Integer, Setting::Enumeration, and Setting::Action create entries for the built-in settings screen. Persistent settings store Boolean, Integer, and Enumeration values, and ignore Action values. The serializer supports at most 32 entries and a payload smaller than 512 bytes.
 
 ## PersistentStore
-
-PersistentStore is the lower-level MCS (Calc Vars) wrapper for application-owned persistent data. It can be used for data beyond the built-in settings array.
 
 ~~~cpp
 class PersistentStore {
@@ -80,25 +136,11 @@ public:
 };
 ~~~
 
-Open() creates the MCS folder when needed and returns zero only on success. Folder names are validated as 1-8 ASCII letters/digits because the SDK truncates longer names to eight characters. Variable names accepted by this wrapper must contain ASCII letters or digits. Load() copies the stored variable into caller-owned memory and reports its type and stored size. When the destination capacity is too small, it returns `EOUTOFBOUND` while still reporting the required size and type. Save() copies the payload into a 4-byte-aligned buffer and rounds the stored size up to a multiple of four bytes before calling MCS_SetVariable(); padding bytes are zero. Therefore, actualSize may be larger than the original payload size. The caller is responsible for providing a sufficiently large buffer and interpreting the variable type. MCS functions can return positive error constants such as MCS_NO_FOLDER and MCS_NO_VARIABLE; wrapper argument and buffer errors use the SDK's negative error codes. Always test for result == 0, not result < 0.
-
-Example:
-
-~~~cpp
-UI::PersistentStore store;
-if (store.Open("MYAPP") == 0) {
-    const char data[] = "example";
-    store.Save("USERDATA", VARTYPE_STR, data, sizeof(data));
-    char buffer[64];
-    uint8_t type = 0;
-    uint32_t size = 0;
-    int result = store.Load("USERDATA", &type, buffer, sizeof(buffer), &size);
-}
-~~~
+PersistentStore is the lower-level MCS wrapper for application-owned persistent data. Folder names are limited to 1-8 ASCII alphanumeric characters. MCS errors can be positive constants; check for result == 0.
 
 ## Read-only file system
 
-The UI Library exposes no file modification functions. The SDK remains unchanged and continues to provide lower-level write, create, delete, rename, and directory-creation functions to applications that deliberately use the SDK directly.
+The UI Library exposes no file modification functions. The lower-level SDK remains unchanged.
 
 ### File
 
@@ -116,7 +158,7 @@ public:
 };
 ~~~
 
-Open(path) always uses OPEN_READ. The class is non-copyable, exposes no raw descriptor, and closes its descriptor in the destructor.
+Open(path) always uses OPEN_READ. File is non-copyable and closes its descriptor in the destructor.
 
 ### FileSystem
 
@@ -151,12 +193,12 @@ public:
 };
 ~~~
 
-Directory is non-copyable and closes an open search handle in its destructor. Next() returns zero for an entry and a negative SDK code when the search ends or fails.
+Directory is non-copyable and closes an open search handle in its destructor.
 
 ## File filters
 
-FileFilter matches file-name suffixes case-insensitively. Directories remain visible regardless of filter. The filter description is metadata and is not currently displayed.
+FileFilter matches file-name suffixes case-insensitively. Directories remain visible regardless of filter.
 
 ## SDK boundary
 
-The UI Library uses sdk/os/gui.hpp, sdk/os/file.hpp, sdk/os/mcs.hpp, sdk/calc/calc.hpp, and sdk/os/debug.hpp. The UI file wrapper is read-only; SDK headers and lower-level functionality are unchanged.
+The UI Library uses SDK LCD, input, GUI, file, MCS, and calculator lifecycle functions. The UI file wrapper is read-only; SDK headers and lower-level functionality are unchanged.

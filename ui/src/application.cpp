@@ -1,8 +1,7 @@
 #include <sdk/calc/calc.hpp>
 #include <ui/filesystem.hpp>
 #include <sdk/os/gui.hpp>
-#include <sdk/os/debug.hpp>
-#include <sdk/os/lcd.hpp>
+#include <ui/framebuffer.hpp>
 #include <sdk/os/mem.hpp>
 #include <stddef.h>
 #include <stdint.h>
@@ -219,24 +218,25 @@ void Sort(Entry *e, int n) {
     }
 }
 void ShowLoadingMessage() {
-    const int x = 2;
-    Debug_SetCursorPosition(x, 0);
-    Debug_PrintString("+--------------------+", false);
-    Debug_SetCursorPosition(x, 1);
-    Debug_PrintString("| Scanning files...  |", false);
-    Debug_SetCursorPosition(x, 2);
-    Debug_PrintString("|   Please wait.     |", false);
-    Debug_SetCursorPosition(x, 3);
-    Debug_PrintString("+--------------------+", false);
-    LCD_Refresh();
+    Framebuffer screen;
+    if (!screen.Begin())
+        return;
+
+    screen.Clear(Colors::White);
+    const int width = screen.Width();
+    const int boxWidth = width > 32 ? width - 32 : width;
+    const int left = (width - boxWidth) / 2;
+    screen.DrawRect(left, 20, boxWidth, 48, Colors::Black);
+    screen.DrawText(left + 8, 30, "Scanning files...", Colors::Blue);
+    screen.DrawText(left + 8, 46, "Please wait.", Colors::Black);
+    screen.Present();
 }
 void ClearLoadingMessage() {
-    const int x = 2;
-    for (int row = 0; row < 4; ++row) {
-        Debug_SetCursorPosition(x, row);
-        Debug_PrintString("                      ", false);
-    }
-    LCD_Refresh();
+    Framebuffer screen;
+    if (!screen.Begin())
+        return;
+    screen.Clear(Colors::White);
+    screen.Present();
 }
 void Scan(const char *dir, const Config &cfg, Entry *e, int *count) {
     *count = 0;
@@ -696,7 +696,17 @@ void Application::Run() {
     while (m_state != StateExit) {
         switch (m_state) {
         case StateMainMenu:
-            RunMainMenu();
+            if (m_config.showMainMenu) {
+                RunMainMenu();
+            } else if (m_config.onStart) {
+                // In custom-UI mode, onStart owns the screen until it
+                // changes the application state or returns normally.
+                m_config.onStart(*this);
+                if (m_state == StateMainMenu)
+                    m_state = StateExit;
+            } else {
+                m_state = StateExit;
+            }
             break;
         case StateFileSelector:
             RunFileSelector();

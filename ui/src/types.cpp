@@ -126,6 +126,7 @@ Config::Config()
       settingsLabel("Settings"),
       quitLabel("Quit"),
       settingsFolder(0),
+      showMainMenu(true),
       showStart(true),
       showFileSelector(false),
       showSettings(false),

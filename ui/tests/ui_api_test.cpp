@@ -194,7 +194,7 @@ int main() {
           "action setting factory");
 
     UI::Config config;
-    Check(config.showStart && config.showQuit &&
+    Check(config.showMainMenu && config.showStart && config.showQuit &&
           config.manageCalculatorLifecycle, "configuration defaults");
     Check(!config.showFileSelector && !config.showSettings &&
           !config.onStart, "optional entries default off");

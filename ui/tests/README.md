@@ -2,12 +2,12 @@
 
 ## Host tests
 
-Run the host-side API tests with:
+Run:
 
 ~~~sh
-make -C ui/tests host-test
+make -C ui/tests clean host-test
 ~~~
 
-The tests use the host C++ compiler and mocked SDK file-system functions. They cover file-filter matching, setting factories and defaults, path normalization and rejection, file operations, read-only open flags, metadata access, directory enumeration, and automatic handle cleanup.
+The host tests use the host C++ compiler and mocked SDK calls. They cover file filters, setting factories and defaults, path normalization, file and directory wrappers, read-only open flags, resource cleanup, framebuffer drawing and clipping, font bounds, and normalized key/touch/system input events.
 
-The host tests do not emulate calculator firmware, MCS internals, or the native GUI implementation. PersistentStore and automatic settings persistence therefore still require testing on the fx-CP400.
+The host tests do not emulate calculator firmware, MCS internals, or the native GUI implementation. PersistentStore, display restoration, and actual touch/key behavior still require testing on the fx-CP400.

@@ -1,12 +1,10 @@
 #include <appdef.hpp>
-#include <sdk/os/debug.hpp>
-#include <sdk/os/lcd.hpp>
 #include <ui/ui.hpp>
 
 APP_NAME("Hollyhock UI Library Demo")
-APP_DESCRIPTION("Read-only file browser and persistent settings example")
+APP_DESCRIPTION("Custom framebuffer UI with touch, keys, files and settings")
 APP_AUTHOR("Friedrich")
-APP_VERSION("1.2")
+APP_VERSION("1.3")
 
 static bool showPreview = true;
 static int previewLength = 24;
@@ -17,15 +15,44 @@ static const char *const textCaseOptions[] = {
     "Lowercase"
 };
 
-static void WaitForUser() {
-    Debug_Printf(0, 5, false, 0, "%s", "Press a number key.");
-    LCD_Refresh();
-    Debug_WaitKey();
+static const char *const menuItems[] = {
+    "Storage check",
+    "Browse files",
+    "Settings",
+    "Exit"
+};
+
+static bool WaitForDismiss() {
+    while (true) {
+        UI::Event event;
+        const int result = UI::Input::Poll(&event);
+        if (result < 0)
+            return false;
+        if (result == 0)
+            continue;
+
+        if (event.type == UI::EventKey &&
+            event.keyAction == UI::KeyPressed)
+            return true;
+        if (event.type == UI::EventTouch &&
+            event.touchAction == UI::TouchDown)
+            return true;
+        if (event.type == UI::EventSystem &&
+            event.systemEvent == UI::SystemActionBarEscape)
+            return true;
+    }
 }
 
-static void ShowStorageInfo(UI::Application &app) {
+static void DrawPageHeader(UI::Framebuffer &screen, const char *title) {
+    screen.Clear(UI::Colors::White);
+    screen.FillRect(0, 0, screen.Width(), 28, UI::Colors::Black);
+    screen.DrawText(8, 10, title, UI::Colors::White);
+    screen.DrawLine(8, 34, screen.Width() - 8, 34, UI::Colors::Gray);
+}
+
+static void ShowStorageInfo(UI::Framebuffer &screen) {
     char normalizedPath[128];
-    int pathResult = UI::FileSystem::NormalizePath(
+    const int pathResult = UI::FileSystem::NormalizePath(
         "fls0/", normalizedPath, sizeof(normalizedPath));
 
     int entryCount = 0;
@@ -40,92 +67,213 @@ static void ShowStorageInfo(UI::Application &app) {
                    (entry.name[1] == '.' && entry.name[2] == 0))))
                 ++entryCount;
         }
-        int closeResult = directory.Close();
+        const int closeResult = directory.Close();
         if (closeResult < 0)
             directoryResult = closeResult;
     }
 
-    Debug_Printf(0, 0, false, 0, "%s", "Read-only storage check");
-    Debug_Printf(0, 1, false, 0, "%s",
-        pathResult == 0
-            ? "Path normalization: OK"
-            : "Path normalization: FAIL");
-    Debug_Printf(0, 2, false, 0, "%s",
-        UI::FileSystem::Exists("fls0/")
-            ? "fls0 root: FOUND"
-            : "fls0 root: MISSING");
-    if (directoryResult == 0)
-        Debug_Printf(0, 3, false, 0, "Directory entries: %d", entryCount);
-    else
-        Debug_Printf(0, 3, false, 0, "Directory error: %d", directoryResult);
-    Debug_Printf(0, 4, false, 0, "MCS settings status: %d",
-        app.SettingsPersistenceResult());
-    WaitForUser();
+    DrawPageHeader(screen, "Storage check");
+    screen.DrawText(10, 48, pathResult == 0
+        ? "Path normalization: OK" : "Path normalization: FAIL",
+        pathResult == 0 ? UI::Colors::Green : UI::Colors::Red);
+    screen.DrawText(10, 66, UI::FileSystem::Exists("fls0/")
+        ? "fls0 root: FOUND" : "fls0 root: MISSING",
+        UI::Colors::Black);
+
+    if (directoryResult == 0) {
+        screen.DrawText(10, 84, "Directory entries:", UI::Colors::Black);
+        screen.DrawText(150, 84, "OK", UI::Colors::Green);
+        screen.DrawText(10, 100, "Count:", UI::Colors::Black);
+        char count[12];
+        int value = entryCount;
+        int digits = 0;
+        do {
+            count[digits++] = static_cast<char>('0' + value % 10);
+            value /= 10;
+        } while (value > 0 && digits < 10);
+        for (int i = 0; i < digits / 2; ++i) {
+            const char swap = count[i];
+            count[i] = count[digits - i - 1];
+            count[digits - i - 1] = swap;
+        }
+        count[digits] = 0;
+        screen.DrawText(70, 100, count, UI::Colors::Blue);
+    } else {
+        screen.DrawText(10, 84, "Directory scan failed", UI::Colors::Red);
+    }
+    screen.DrawText(10, screen.Height() - 18,
+                    "Press any key or touch to return", UI::Colors::Gray);
+    screen.Present();
+    WaitForDismiss();
 }
 
 static void FileSelected(UI::Application &app, const char *path) {
     (void)app;
+    UI::Framebuffer screen;
+    if (!screen.Begin())
+        return;
+
     struct stat info;
-    int statResult = UI::FileSystem::Stat(path, &info);
+    const int statResult = UI::FileSystem::Stat(path, &info);
 
     UI::File file;
-    int result = file.Open(path);
+    const int openResult = file.Open(path);
     uint32_t fileSize = 0;
-    int sizeResult = result;
-    int seekResult = result;
+    int sizeResult = openResult;
+    int seekResult = openResult;
     char preview[49];
     int bytesRead = -1;
     preview[0] = 0;
 
-    if (result >= 0) {
+    if (openResult >= 0) {
         sizeResult = file.GetSize(&fileSize);
         seekResult = file.Seek(0, SEEK_SET);
         if (sizeResult == 0 && seekResult >= 0 && showPreview) {
             int requested = previewLength;
-            if (requested < 8) requested = 8;
-            if (requested > 48) requested = 48;
-            int bytesToRead = fileSize < (uint32_t)requested ? (int)fileSize : requested;
+            if (requested < 8)
+                requested = 8;
+            if (requested > 48)
+                requested = 48;
+            const int bytesToRead =
+                fileSize < static_cast<uint32_t>(requested)
+                    ? static_cast<int>(fileSize) : requested;
             bytesRead = file.Read(preview, bytesToRead);
-            if (bytesRead >= 0) {
-                preview[bytesRead] = '\0';
+            if (bytesRead >= 0 && bytesRead <= bytesToRead) {
+                preview[bytesRead] = 0;
                 for (int i = 0; i < bytesRead; ++i) {
-                    unsigned char c = (unsigned char)preview[i];
+                    const unsigned char c =
+                        static_cast<unsigned char>(preview[i]);
                     if (c < 32 || c > 126)
                         preview[i] = ' ';
                     else if (textCase == 1 && c >= 'a' && c <= 'z')
-                        preview[i] = (char)(c - ('a' - 'A'));
+                        preview[i] = static_cast<char>(c - ('a' - 'A'));
                     else if (textCase == 2 && c >= 'A' && c <= 'Z')
-                        preview[i] = (char)(c + ('a' - 'A'));
+                        preview[i] = static_cast<char>(c + ('a' - 'A'));
                 }
+            } else {
+                bytesRead = -1;
             }
         }
         file.Close();
     }
-    const bool closed = !file.IsOpen();
 
-    Debug_Printf(0, 0, false, 0, "%s", "Selected file (read-only)");
-    Debug_Printf(0, 1, false, 0, "%s", path);
+    DrawPageHeader(screen, "Selected file");
+    screen.DrawText(8, 42, path, UI::Colors::Blue);
     if (statResult == 0)
-        Debug_Printf(0, 2, false, 0, "Stat size: %u bytes",
-            (unsigned int)info.fileSize);
+        screen.DrawText(8, 58, "File metadata: available", UI::Colors::Green);
     else
-        Debug_Printf(0, 2, false, 0, "Stat error: %d", statResult);
-    if (result < 0)
-        Debug_Printf(0, 3, false, 0, "Open error: %d", result);
-    else if (sizeResult < 0 || seekResult < 0)
-        Debug_Printf(0, 3, false, 0, "Size:%d Seek:%d", sizeResult, seekResult);
-    else
-        Debug_Printf(0, 3, false, 0, "Size:%u Close:%s",
-            (unsigned int)fileSize, closed ? "PASS" : "FAIL");
-    if (!showPreview)
-        Debug_Printf(0, 4, false, 0, "%s", "Preview disabled.");
-    else if (bytesRead < 0)
-        Debug_Printf(0, 4, false, 0, "Read error: %d", bytesRead);
-    else {
-        Debug_Printf(0, 4, false, 0, "%s", "Text preview:");
-        Debug_Printf(0, 5, false, 0, "%s", preview);
+        screen.DrawText(8, 58, "File metadata: error", UI::Colors::Red);
+
+    if (openResult < 0) {
+        screen.DrawText(8, 76, "Open failed", UI::Colors::Red);
+    } else if (sizeResult < 0 || seekResult < 0) {
+        screen.DrawText(8, 76, "Could not inspect file", UI::Colors::Red);
+    } else {
+        screen.DrawText(8, 76, "Read-only open: OK", UI::Colors::Green);
+        screen.DrawText(8, 92, "Preview:", UI::Colors::Black);
+        if (!showPreview)
+            screen.DrawText(8, 108, "Preview disabled", UI::Colors::Gray);
+        else if (bytesRead < 0)
+            screen.DrawText(8, 108, "Read failed", UI::Colors::Red);
+        else
+            screen.DrawText(8, 108, preview, UI::Colors::Black);
     }
-    WaitForUser();
+
+    screen.DrawText(8, screen.Height() - 18,
+                    "Press any key or touch to return", UI::Colors::Gray);
+    screen.Present();
+    WaitForDismiss();
+}
+
+static void DrawMainMenu(UI::Framebuffer &screen, int selected) {
+    DrawPageHeader(screen, "Hollyhock UI Demo");
+    const int top = 48;
+    const int rowHeight = 26;
+
+    for (int i = 0; i < 4; ++i) {
+        const int y = top + i * rowHeight;
+        if (i == selected) {
+            screen.FillRect(8, y, screen.Width() - 16, rowHeight - 2,
+                            UI::Colors::Blue);
+            screen.DrawText(16, y + 8, menuItems[i], UI::Colors::White);
+        } else {
+            screen.DrawRect(8, y, screen.Width() - 16, rowHeight - 2,
+                            UI::Colors::Gray);
+            screen.DrawText(16, y + 8, menuItems[i], UI::Colors::Black);
+        }
+    }
+
+    screen.DrawText(8, screen.Height() - 18,
+                    "UP/DOWN + EXE or touch a row", UI::Colors::Gray);
+    screen.Present();
+}
+
+static void StartApplication(UI::Application &app) {
+    UI::Framebuffer screen;
+    if (!screen.Begin()) {
+        app.Close();
+        return;
+    }
+
+    int selected = 0;
+    DrawMainMenu(screen, selected);
+
+    while (app.IsRunning()) {
+        UI::Event event;
+        const int result = UI::Input::Poll(&event);
+        if (result < 0) {
+            app.Close();
+            return;
+        }
+        if (result == 0)
+            continue;
+
+        if (event.type == UI::EventSystem &&
+            event.systemEvent == UI::SystemActionBarEscape) {
+            app.Close();
+            return;
+        }
+
+        bool activate = false;
+        if (event.type == UI::EventKey &&
+            event.keyAction == UI::KeyPressed) {
+            if (event.keyCode == UI::KeyUp) {
+                selected = (selected + 3) % 4;
+            } else if (event.keyCode == UI::KeyDown) {
+                selected = (selected + 1) % 4;
+            } else if (event.keyCode == UI::KeyEXE) {
+                activate = true;
+            } else if (event.keyCode == UI::KeyPowerClear) {
+                app.Close();
+                return;
+            }
+        } else if (event.type == UI::EventTouch &&
+                   event.touchAction == UI::TouchDown) {
+            const int top = 48;
+            const int rowHeight = 26;
+            if (event.y >= top && event.y < top + 4 * rowHeight) {
+                selected = (event.y - top) / rowHeight;
+                activate = true;
+            }
+        }
+
+        if (activate) {
+            if (selected == 0) {
+                ShowStorageInfo(screen);
+            } else if (selected == 1) {
+                app.OpenFileSelector();
+                return;
+            } else if (selected == 2) {
+                app.OpenSettings();
+                return;
+            } else {
+                app.Close();
+                return;
+            }
+        }
+
+        DrawMainMenu(screen, selected);
+    }
 }
 
 static void ResetSettings(UI::Application &app) {
@@ -138,15 +286,16 @@ static void ResetSettings(UI::Application &app) {
 extern "C" void main() {
     UI::Config config;
     config.title = "Hollyhock UI Demo";
-    config.startLabel = "Storage check";
-    config.filesLabel = "Browse files";
-    config.settingsLabel = "Settings";
-    config.quitLabel = "Quit";
     config.settingsFolder = "UIDEMO";
 
-    config.showStart = true;
-    config.onStart = ShowStorageInfo;
+    // Use the library's lifecycle and persistence, but own the whole screen.
+    config.showMainMenu = false;
+    config.showStart = false;
     config.showFileSelector = true;
+    config.showSettings = true;
+    config.showQuit = false;
+
+    config.onStart = StartApplication;
     config.onFileSelected = FileSelected;
 
     const UI::FileFilter filters[] = {
@@ -161,7 +310,6 @@ extern "C" void main() {
         UI::Setting::Enumeration("Text case", &textCase, textCaseOptions, 3, "Preview letter case"),
         UI::Setting::Action("Reset settings", ResetSettings, "Restore default values")
     };
-    config.showSettings = true;
     config.settings = settings;
     config.settingCount = sizeof(settings) / sizeof(settings[0]);
     config.manageCalculatorLifecycle = true;

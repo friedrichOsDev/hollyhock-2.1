@@ -1,46 +1,56 @@
 # Hollyhock UI Library
 
-The Hollyhock UI Library is a small C++ helper library for applications built with the Hollyhock 2.1 SDK on the Casio fx-CP400. It provides an application menu, a read-only file selector and file-system wrapper, built-in settings, and persistent storage backed by the calculator's MCS (Calc Vars).
+A small C++ helper library for fx-CP400 applications built with the Hollyhock 2.1 SDK. It provides an optional main menu, direct LCD framebuffer drawing, normalized key/touch input, a read-only file selector and file-system wrapper, settings, and MCS-backed persistence.
 
 ## Documentation
 
-- [Demo walkthrough](demo-walkthrough.md) — the calculator demo and its read-only browser workflow.
-- [Getting started](getting-started.md) — toolchain requirements, build steps, linking, and a minimal application.
-- [Application menus and settings](application.md) — configuration, callbacks, navigation, settings, and automatic MCS persistence.
-- [File system API](filesystem.md) — normalized paths, read-only file access, directories, filters, and errors.
-- [API reference](api-reference.md) — public classes, methods, and data types.
+- [Getting started](getting-started.md)
+- [Application menus and settings](application.md)
+- [Framebuffer and input](framebuffer-input.md)
+- [File system API](filesystem.md)
+- [API reference](api-reference.md)
+- [Demo walkthrough](demo-walkthrough.md)
 
 ## Features
 
-- Main menu with optional Start, Files, Settings, and Quit entries.
-- File selector rooted at fls0, with optional extension filters.
-- Read-only file and directory wrappers with automatic handle cleanup.
-- Path normalization that rejects unsupported volumes and parent traversal.
+- Optional built-in Start, Files, Settings, and Quit menu.
+- Custom application screens using Framebuffer and Input.
+- RGB565 drawing directly into LCD VRAM.
+- Bounded pixel, rectangle, line, and text drawing.
+- Embedded 5x7 printable-ASCII bitmap font.
+- Normalized key, touch, action-bar, and unknown events.
+- Existing read-only file selector and file-system API.
 - Boolean, integer, enumeration, and action settings.
-- Optional per-application MCS folders for persistent settings.
-- PersistentStore API for application-owned Calc Var data.
+- Optional per-application MCS settings persistence.
+
+## Custom screens
+
+The built-in menu remains enabled by default. Set Config::showMainMenu to false to invoke onStart directly after the display lifecycle has been initialized. The callback can own the full screen using Framebuffer and Input. It can also request the existing file selector or settings screen; when either returns, onStart is called again.
+
+See framebuffer-input.md for lifecycle rules and examples.
+
+## Display lifecycle
+
+Framebuffer attaches to the existing LCD VRAM and does not allocate a second image buffer. It does not manage VRAM backup/restore. Normally create Framebuffer inside an Application callback after Application::Run() has called calcInit(). Application remains responsible for calcEnd() and restoring the previous display state.
 
 ## Read-only file access
 
-The UI Library intentionally exposes no file-writing or file-modification API. It has no write modes, Write(), create, delete, rename, move, or directory-creation operations. The built-in browser only navigates, lists, inspects, and reads files.
-
-This restriction does not modify the Hollyhock SDK. Its lower-level file functions remain available to applications that deliberately choose to use the SDK directly. Such calls are outside the UI Library's read-only wrapper.
+The UI Library intentionally exposes no file-writing or file-modification API. Its file wrapper only opens in read-only mode. The underlying SDK remains unchanged.
 
 ## Persistent settings
 
-Set UI::Config::settingsFolder to a unique 1-8 character alphanumeric MCS folder name to enable automatic loading and saving of built-in settings. The library creates the folder and immediately persists the initial default settings when the SETTINGS variable is missing. Subsequent setting changes are saved automatically, and the application saves once more on normal exit. Names longer than eight characters are rejected to avoid the SDK's silent folder-name truncation.
-
-The automatic serializer supports at most 32 settings and a payload smaller than 512 bytes. See the application guide for its format and limits. Applications can use UI::PersistentStore for their own MCS variables and data.
+Set UI::Config::settingsFolder to a unique 1-8 character alphanumeric MCS folder name. The library loads settings before the first application screen, saves after changes, and saves again on normal exit. The serializer supports at most 32 entries and a payload smaller than 512 bytes.
 
 ## Limitations
 
-The file-system wrapper supports fls0 only. File and directory names are converted to printable ASCII; characters outside ASCII 32-126 are shown as question marks. Such entries cannot be selected reliably because their original names cannot be reconstructed from the displayed text. Non-ASCII paths are rejected.
+- File-system wrapper supports fls0 only.
+- Framebuffer draws directly to VRAM; there is no double-buffer.
+- Built-in font supports printable ASCII 32-126; lowercase is rendered as uppercase.
+- DrawText handles at most 512 input bytes per call.
+- Input wrapper exposes the SDK's single-touch data; multi-touch is not included.
+- The library is a small drawing/input layer, not a general widget framework.
 
-The UI library does not provide a general-purpose widget system or custom dialog builder. The built-in selector collects up to 64 entries per directory and displays five per page.
-
-The SDK and UI library are freestanding and linked into each application rather than loaded as a separate runtime library.
-
-## Build the demo
+## Build
 
 From the repository root:
 
@@ -48,8 +58,14 @@ From the repository root:
 ./app_template/build.sh
 ~~~
 
-The script builds the SDK, UI library, and demo application. It produces app_template/app_template.hhk and app_template/app_template.bin. Copy the .hhk file to the calculator's fls0 root and launch it with the Hollyhock launcher.
+This builds the SDK, UI library, and custom framebuffer demo. Copy app_template/app_template.hhk to the calculator's fls0 root and launch it with the Hollyhock launcher.
 
-## Lifetime rule
+## Host tests
 
-The application configuration stores pointers to strings, filters, settings arrays, option arrays, and setting values. Keep these alive for the entire call to Application::Run(). The demo follows this pattern.
+Run:
+
+~~~sh
+make -C ui/tests clean host-test
+~~~
+
+The tests mock the SDK calls. They do not replace testing on the fx-CP400.

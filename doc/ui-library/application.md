@@ -1,8 +1,8 @@
 # Application Menus and Settings
 
-The main entry point of the UI Library is UI::Application. It builds a menu from a UI::Config structure and runs a synchronous menu loop.
+The main entry point of the UI Library is UI::Application. It can show the built-in menu or hand the entire main screen to the application.
 
-Include the API with:
+Include:
 
 ~~~cpp
 #include <ui/ui.hpp>
@@ -11,12 +11,10 @@ Include the API with:
 ## Application flow
 
 1. Create a UI::Config structure.
-2. Set the title, menu labels, callbacks, filters, settings, and optional settings folder.
-3. Create a UI::Application object with the configuration.
+2. Configure menu visibility, callbacks, settings, filters, and an optional MCS folder.
+3. Create a UI::Application object.
 4. Call app.Run().
-5. The library displays the main menu and handles navigation until the app is closed.
-
-The main menu can show Start, Files, Settings, and Quit. Start needs an onStart callback; Files and Settings are enabled by their corresponding flags.
+5. The library initializes the calculator display and settings persistence, then runs the selected application flow.
 
 ## Config fields
 
@@ -24,20 +22,56 @@ The main menu can show Start, Files, Settings, and Quit. Start needs an onStart 
 | --- | --- | --- | --- |
 | title | const char * | "Application" | Main menu title |
 | startLabel, filesLabel, settingsLabel, quitLabel | const char * | Default labels | Menu button text |
+| settingsFolder | const char * | null | Optional MCS folder |
+| showMainMenu | bool | true | Shows the built-in main menu |
 | showStart | bool | true | Allows the Start entry |
-| showFileSelector | bool | false | Enables the built-in file selector |
-| showSettings | bool | false | Enables the built-in settings menu |
-| showQuit | bool | true | Shows the Quit entry |
-| manageCalculatorLifecycle | bool | true | Lets the library call calcInit() and calcEnd() |
-| settingsFolder | const char * | null | Optional MCS folder used for this app's persistent settings |
+| showFileSelector | bool | false | Enables built-in file selector |
+| showSettings | bool | false | Enables built-in settings |
+| showQuit | bool | true | Shows Quit |
+| manageCalculatorLifecycle | bool | true | Library calls calcInit() and calcEnd() |
 | onStart, onSettings | ActionCallback | null | Start and custom settings callbacks |
-| onFileSelected | FileCallback | null | Called after a file is selected |
-| filters | const FileFilter * | null | File extension filters for the selector |
-| filterCount | int | 0 | Number of entries in filters |
-| settings | Setting * | null | Array of built-in settings |
-| settingCount | int | 0 | Number of entries in settings |
+| onFileSelected | FileCallback | null | Called after file selection |
+| filters | const FileFilter * | null | File extension filters |
+| filterCount | int | 0 | Number of filters |
+| settings | Setting * | null | Built-in setting array |
+| settingCount | int | 0 | Number of settings |
 
-The configuration is copied into the Application object, but pointer fields remain pointers to the original data. Keep strings, arrays, option lists, callbacks, and setting values alive while the application is running.
+Keep all strings and arrays referenced by Config alive for the entire call to Run().
+
+## Built-in main menu
+
+The built-in menu is enabled by default. It displays the configured Start, Files, Settings, and Quit entries. Start requires showStart and a non-null onStart callback.
+
+## Custom main screen
+
+Set showMainMenu to false to bypass the built-in menu. After initializing the LCD lifecycle and settings persistence, Application::Run() invokes onStart directly.
+
+The onStart callback owns the application screen. It can use UI::Framebuffer and UI::Input to implement its own menu, game, or complete UI. It should normally keep running its own event loop until it calls Close(), OpenFileSelector(), or OpenSettings().
+
+If onStart switches to the built-in file selector or settings screen, the library runs that screen. When it returns to the main application state, onStart is called again so the custom screen can be redrawn. If onStart returns without changing the state, the application exits.
+
+~~~cpp
+static void Start(UI::Application &app) {
+    UI::Framebuffer screen;
+    if (!screen.Begin()) {
+        app.Close();
+        return;
+    }
+
+    // Draw a custom screen and process UI::Input events here.
+}
+
+extern "C" void main() {
+    UI::Config config;
+    config.showMainMenu = false;
+    config.onStart = Start;
+
+    UI::Application app(config);
+    app.Run();
+}
+~~~
+
+See framebuffer-input.md for drawing and event examples.
 
 ## Callbacks
 
@@ -46,9 +80,9 @@ typedef void (*ActionCallback)(Application &app);
 typedef void (*FileCallback)(Application &app, const char *path);
 ~~~
 
-The application reference allows a callback to change menu state. Call ReturnToMenu() to return to the main menu or Close() to request exit.
+Call ReturnToMenu() to return to the main application state, Close() to request exit, or OpenFileSelector()/OpenSettings() to switch to a built-in screen.
 
-### File selection callback
+## File selection callback
 
 ~~~cpp
 static void FileSelected(UI::Application &app, const char *path) {
@@ -61,58 +95,38 @@ static void FileSelected(UI::Application &app, const char *path) {
 }
 ~~~
 
-The path is valid for the duration of the callback. Copy it into an application-owned buffer when it must be kept for later use.
+The path is valid for the duration of the callback. A custom file browser can combine Framebuffer, Input, Directory, and FileSystem.
 
 ## Navigation methods
 
 | Method | Behavior |
 | --- | --- |
-| Run() | Starts the menu loop and returns after exit. |
+| Run() | Starts the application loop and returns after exit. |
 | Close() | Requests application exit. |
-| ReturnToMenu() | Changes the current state to the main menu. |
-| OpenFileSelector() | Opens the file selector when enabled. |
+| ReturnToMenu() | Changes the current state to the main application state. |
+| OpenFileSelector() | Opens the built-in file selector when enabled. |
 | OpenSettings() | Opens the built-in settings screen when enabled. |
 | IsRunning() const | Returns false after exit is selected. |
-| SettingsPersistenceResult() const | Returns 0 on success or the latest MCS persistence error. |
+| SettingsPersistenceResult() const | Returns 0 on success or latest MCS persistence error. |
 
 ## Built-in settings
-
-The current implementation supports four setting types:
 
 | Type | Factory | Value pointer | Behavior |
 | --- | --- | --- | --- |
 | Boolean | Setting::Boolean() | bool * | Toggles true/false |
-| Integer | Setting::Integer() | int * | Adds the step and wraps to the minimum after the maximum |
-| Enumeration | Setting::Enumeration() | int * | Advances to the next option and wraps to zero |
-| Action | Setting::Action() | none | Calls the supplied callback |
+| Integer | Setting::Integer() | int * | Adds step and wraps |
+| Enumeration | Setting::Enumeration() | int * | Advances and wraps |
+| Action | Setting::Action() | none | Calls callback |
 
-Boolean values need valid bool storage. Integer values should start within configured bounds. Enumeration values must be valid indices from zero to optionCount - 1. The option array must contain enough strings. Setting descriptions are stored but not currently displayed.
+Setting descriptions are stored but not currently displayed.
 
-### Persistent settings in Calc Vars
+### Persistent settings
 
-Persistence is optional. Set config.settingsFolder to a unique MCS folder name for the application. The SDK's MCS folder API truncates names longer than eight characters, so the UI Library rejects names outside 1-8 ASCII letters or digits instead of silently allowing collisions. Names are normalized to uppercase.
+Set config.settingsFolder to a unique 1-8 character MCS folder name. The library loads saved settings before the first application screen and saves after changes and normal exit. The serializer supports at most 32 settings and a payload smaller than 512 bytes.
 
-For example, the demo uses UIDEMO. Give every application a distinct, stable folder name. The folder is created automatically on first run.
+Use UI::PersistentStore for application-owned persistent data beyond the built-in settings array.
 
-When settingsFolder is set, UI::Application loads saved settings before showing the first menu. It saves settings after a settings entry is selected and once again when Run() exits normally. When the SETTINGS variable does not exist yet, the library now immediately writes the application's default settings to MCS during startup. This creates a visible SETTINGS variable on the first launch rather than waiting for the first settings interaction or application exit.
-
-The automatic settings serializer supports Boolean, Integer, and Enumeration settings plus Action entries (actions have no stored value). It currently supports up to 32 entries and a serialized payload smaller than 512 bytes. Integer definitions must have a valid minimum/maximum range and a positive step; enumeration definitions need a non-empty option array. Initial and changed values must remain within their configured bounds before they can be persisted. The saved data is versioned; incompatible or invalid data is rejected rather than copied into application variables.
-
-Check the result with:
-
-~~~cpp
-int result = app.SettingsPersistenceResult();
-~~~
-
-A result of zero means the latest persistence operation succeeded. A nonzero result is an SDK error or a format/size error. Persistence errors do not terminate the UI menu.
-
-For application-owned data beyond the built-in settings array, use UI::PersistentStore directly. It stores named MCS variables and does not use the file-system wrapper.
-
-## Custom settings callback
-
-Use onSettings when you want custom settings behavior instead of a built-in settings array. It is called only when settings is null or settingCount is zero.
-
-## File selector configuration
+## Built-in file selector
 
 ~~~cpp
 static const UI::FileFilter filters[] = {
@@ -126,22 +140,20 @@ config.filterCount = 2;
 config.onFileSelected = FileSelected;
 ~~~
 
-Extensions can include or omit the leading dot. Matching is case-insensitive. Directories are always shown. With no filters, all files are shown. The selector starts at fls0, displays five entries per page, collects up to 64 entries in a directory, and sorts directories before files.
+Extensions can include or omit the leading dot. Matching is case-insensitive. Directories are always shown. The selector starts at fls0, displays five entries per page, collects up to 64 entries in a directory, and sorts directories before files.
 
-The file-system wrapper is read-only. It does not create, write, delete, rename, move, or create directories. This restriction does not change the underlying SDK.
+The file-system wrapper is read-only. It does not create, write, delete, rename, move, or create directories.
 
 ## Display lifecycle
 
 By default, manageCalculatorLifecycle is true. When Run() starts, the library calls calcInit(). When the application exits, it calls calcEnd() to restore the display state managed by the SDK.
 
-Keep the default unless your application already manages this lifecycle. Do not let two parts of the application independently back up and restore the same display state.
+Framebuffer does not own this lifecycle. Create framebuffer objects at runtime after display initialization, normally inside callbacks. Do not independently back up or restore VRAM while Application owns the display lifecycle.
 
-The dialog implementation relies on reverse-engineered GUI behavior exposed by the SDK. Test GUI behavior on the target calculator and firmware.
+## Limitations
 
-## Practical limitations
-
-- The built-in menu is a simple button-based interface, not a general widget system.
-- MCS settings persistence is opt-in and supports at most 32 entries in a payload smaller than 512 bytes.
+- The built-in menu is a simple button-based interface, not a widget system.
+- The framebuffer draws directly into VRAM and does not use a second buffer.
+- The built-in font supports printable ASCII 32-126.
 - The file selector supports fls0 only, collects 64 entries per directory, and displays five per page.
 - Non-ASCII file and directory names are shown as question marks.
-- The implementation targets this repository's fx-CP400/Hollyhock SDK combination.
