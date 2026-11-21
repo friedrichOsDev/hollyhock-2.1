@@ -17,6 +17,27 @@ the Hollyhock UI Library for its user interface.
 The ELF, BIN, and EXEC loaders remain separate from the UI. The launcher still
 produces run.bin and retains its existing linker/bootstrap arrangement.
 
+## Editing metadata after compilation
+
+The launcher displays metadata stored inside the compiled program, not
+necessarily the file's current filename. Renaming a `.bin` or `.hhk` file does
+not rename the program in the launcher when an embedded display name exists.
+
+Use [`tools/hhkmeta.py`](../tools/hhkmeta.py) to inspect or edit the name,
+description, author, and version of an existing `.bin` or `.hhk` file without
+rebuilding it:
+
+```sh
+python3 tools/hhkmeta.py show application.bin
+python3 tools/hhkmeta.py set application.bin --name "New Display Name"
+```
+
+Run the commands from the repository root. The tool creates a
+`.patched.bin` or `.patched.hhk` output by default. See the
+[compiled metadata guide](../doc/user/metadata.md) for all options, backup
+behavior, and format limitations. An edit is refused when the new value does
+not fit in the metadata space already reserved by the compiled file.
+
 ## UI controls
 
 The screen is rendered by UI::Framebuffer; events are read through UI::Input.
