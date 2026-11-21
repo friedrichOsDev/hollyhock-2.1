@@ -1,104 +1,107 @@
 # Editing compiled program metadata
 
-The name shown by the Hollyhock Launcher is stored inside the compiled program.
-It is not taken from the `.bin` or `.hhk` filename when a display name is
-present. Renaming `PythonExtra.bin` to `Python.bin`, for example, does not
-change the launcher's displayed name.
+The Hollyhock Launcher can display metadata embedded in the compiled program.
+This is separate from the filename stored inside some applications. There are
+therefore two different things that may need changing:
 
-Use `tools/hhkmeta.py` to inspect or change the metadata of an already compiled
-`.bin` or `.hhk` file. You do not need to rebuild or relink the application for
-an edit that fits in the space already reserved for that attribute. The tool
-uses Python 3 from the standard library; no SH-4 compiler or third-party
-package is required.
+- **Launcher metadata** (display name, description, author, version): use
+  \`tools/hhkmeta.py\`.
+- **An application's hard-coded calculator file path** (for example
+  \`\\fls0\\PythonExtra-hh2.bin\`): use \`tools/hhkrename.py\`.
+
+Renaming a file in the computer's file manager does not update either value
+inside the binary.
 
 ## Inspect metadata
 
-From the repository root, run:
+From the repository root:
 
-```sh
+\`\`\`sh
 python3 tools/hhkmeta.py show path/to/application.bin
 python3 tools/hhkmeta.py show path/to/application.hhk
-```
+\`\`\`
 
 The output shows the compiled name, description, author and version, along
-with the maximum number of characters that can currently fit in each field.
+with the maximum number of characters currently available in each field.
 
-## Change metadata
+## Change launcher metadata
 
-Specify one or more attributes. The tool creates a new file named
-`<original-name>.patched.<extension>` by default:
+Use \`set\` to edit one or more metadata attributes. By default, the tool
+creates a new file named \`<original-name>.patched.<extension>\`:
 
-```sh
-python3 tools/hhkmeta.py set path/to/PythonExtra.bin \
-    --name "Python Extra" \
-    --author "Python Extra contributors" \
-    --version "1.0.0"
-```
+\`\`\`sh
+python3 tools/hhkmeta.py set path/to/application.bin \\
+    --name "New Display Name" \\
+    --author "New Author"
+\`\`\`
 
-To choose a different output path:
+Choose a specific output path with \`-o\`:
 
-```sh
-python3 tools/hhkmeta.py set path/to/application.hhk \
-    --name "My Application" \
-    --description "A short description" \
+\`\`\`sh
+python3 tools/hhkmeta.py set path/to/application.hhk \\
+    --name "My Application" \\
+    --description "A short description" \\
     -o path/to/MyApplication.hhk
-```
+\`\`\`
 
-To update the input file directly, use `--in-place`. The original is saved as
-`FILE.bak` first. The tool refuses to overwrite an existing backup:
+To edit the input file directly, use \`--in-place\`. The original is saved as
+\`FILE.bak\` first:
 
-```sh
-python3 tools/hhkmeta.py set path/to/application.bin \
-    --name "My Application" --in-place
-```
+\`\`\`sh
+python3 tools/hhkmeta.py set path/to/application.bin \\
+    --name "New Display Name" --in-place
+\`\`\`
 
-Copy the resulting `.bin` or `.hhk` file to the calculator as usual. The
-filename can be changed independently if desired; the metadata controls the
-name and other information displayed by the launcher.
+## Rename a file and update its embedded calculator path
 
-## Rename the file and embedded program name together
+Some applications contain an absolute calculator path in their program image,
+such as \`\\fls0\\PythonExtra-hh2.bin\`. The application opens that exact path at
+runtime. Renaming the file on the computer or calculator alone leaves the
+embedded string unchanged and can make the application fail to start.
 
-Use the `rename` command when the filename and the metadata name must match.
-The destination filename (without its extension) becomes the embedded launcher
-name. The command supports both `.bin` and `.hhk` files:
+Use the separate \`tools/hhkrename.py\` utility for this case:
 
-```sh
-python3 tools/hhkmeta.py rename PythonExtra-hh2.bin PythonExtra.bin
-```
+\`\`\`sh
+python3 tools/hhkrename.py PythonExtra-hh2.bin PythonExtra.bin
+\`\`\`
 
-For the example above, the tool changes the embedded name to `PythonExtra`,
-writes `PythonExtra.bin`, and removes the old `PythonExtra-hh2.bin` path only
-after the new file has been written successfully. The description, author,
-version, load address, entry point, and executable code are preserved.
+This performs two linked operations:
 
-The destination must use the same format extension as the source. An existing
-destination is never overwritten. If the new display name does not fit in the
-compiled metadata slot, the command fails and leaves the original file
-untouched. If source deletion fails after the new file is written, the tool
-reports the situation and keeps both files.
+1. Replaces the embedded path with \`\\fls0\\PythonExtra.bin\` (or preserves
+   \`\\drv0\\\` when that is the path found in the program).
+2. Writes the file under the new name and removes the old source file only
+   after the updated destination has been written successfully.
 
-## Important limits
+Run it from the folder containing the file, or pass full paths to both
+arguments. Use \`--dry-run\` to inspect the embedded path changes without
+writing anything:
 
-- The tool preserves the program's load address, entry point and executable
-  bytes. It only writes into the metadata space already reserved by the
-  compiled file.
-- If an attribute is longer than its available slot, the tool stops with an
-  error and reports the current maximum. Rebuild the application with a longer
-  metadata string to reserve more space; do not try to force the edit.
-- `.bin` metadata uses the launcher's existing four-field format. All four
-  fields must be present and non-empty because the current BIN metadata parser
-  skips empty fields.
-- A `.hhk` attribute can only be changed when its corresponding
-  `.hollyhock_*` ELF section exists in the file.
-- Metadata values are limited to printable ASCII (characters `0x20` through
-  `0x7E`). This matches the launcher's current text display support.
-- Unused bytes in fixed metadata slots are zero-padded, matching the
-  launcher's string parser and avoiding visible trailing spaces. The first
-  three BIN slots retain their detected boundaries because the next metadata
-  string marks their end. The final BIN version slot ends at its 4-byte
-  alignment boundary; after shortening the version, the reported maximum for
-  that field can therefore shrink. To make a later, longer version change,
-  start again from the untouched original BIN or rebuild the application.
+\`\`\`sh
+python3 tools/hhkrename.py PythonExtra-hh2.bin PythonExtra.bin --dry-run
+\`\`\`
 
-Always keep a copy of the original application until you have tested the
-patched file on the calculator.
+**This utility does not change the launcher's display metadata.** Use
+\`hhkmeta.py\` separately only when the displayed name or other metadata also
+needs changing.
+
+## Safety and format limits
+
+- \`hhkrename.py\` only changes a full embedded \`\\fls0\\...\` or \`\\drv0\\...\`
+  path whose basename exactly matches the source filename. It updates every
+  matching occurrence and refuses to guess when no match is found.
+- It uses only the NUL bytes already following the embedded string as
+  additional path capacity. If the new path is too long, it stops before
+  changing the source file.
+- It never overwrites an existing destination. If the original cannot be
+  removed after the new file is written, both copies are kept and a warning is
+  printed.
+- \`hhkmeta.py\` edits only the launcher's metadata fields. It does not rename
+  files or change embedded file paths.
+- Metadata values supported by the launcher are printable ASCII
+  (characters \`0x20\` through \`0x7E\`).
+- For \`.bin\`, all four metadata fields must be present and non-empty because
+  the current launcher parser skips empty fields. For \`.hhk\`, an attribute
+  can only be changed if its \`.hollyhock_*\` section exists.
+
+Keep a backup of the original application until the renamed program has been
+tested on the calculator.

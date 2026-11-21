@@ -313,65 +313,6 @@ def main() -> int:
     destination.add_argument("--in-place", action="store_true", help="edit input; create FILE.bak first")
     p_set.add_argument("--force", action="store_true", help="overwrite an existing output file")
 
-    p_rename = commands.add_parser(
-        "rename",
-        help="rename a compiled file and synchronize its embedded display name"
-    )
-    p_rename.add_argument("source", help="current compiled .bin or .hhk file")
-    p_rename.add_argument("destination", help="new filename; its stem becomes the embedded name")
-
-    args = parser.parse_args()
-
-    if args.command == "rename":
-        source = Path(args.source).expanduser().resolve()
-        destination = Path(args.destination).expanduser().resolve()
-        try:
-            if not source.is_file():
-                raise MetadataError(f"Source file does not exist or is not a regular file: {source}")
-            if source == destination:
-                raise MetadataError("Source and destination are the same path. Use 'set --name' to only change metadata.")
-
-            data = source.read_bytes()
-            meta = load_metadata(data)
-            expected_suffix = ".bin" if meta["format"] == "BIN" else ".hhk"
-            if destination.suffix.lower() != expected_suffix:
-                raise MetadataError(
-                    f"This file contains {meta['format']} data; the destination must end in {expected_suffix}."
-                )
-
-            # The target's basename (without extension) is the canonical
-            # launcher display name. Validate it before creating any output.
-            new_name = destination.stem
-            encode_value("name", new_name, allow_empty=False)
-            updates = {"name": new_name}
-            result = patch_bin(data, meta, updates) if meta["format"] == "BIN" else patch_elf(data, meta, updates)
-
-            # Reuse the safe atomic output writer. It refuses existing
-            # destinations and leaves the source untouched if writing fails.
-            output_args = argparse.Namespace(
-                in_place=False, output=str(destination), force=False
-            )
-            target = write_result(source, result, output_args)
-
-            # Only remove the old path after the complete output has been
-            # written successfully. If unlink fails, keep both copies and
-            # report their locations rather than losing the program.
-            try:
-                source.unlink()
-            except OSError as exc:
-                raise MetadataError(
-                    f"Created {target}, but could not remove the original {source}: {exc}. "
-                    "Both files have been kept."
-                ) from exc
-
-            print(f"Renamed: {source} -> {target}")
-            print(f"Embedded name: {new_name}")
-            print("Description, author, version and executable bytes were preserved.")
-            return 0
-        except (OSError, MetadataError, struct.error) as exc:
-            print(f"error: {exc}", file=sys.stderr)
-            return 2
-
     source = Path(args.file).expanduser().resolve()
     try:
         data = source.read_bytes()

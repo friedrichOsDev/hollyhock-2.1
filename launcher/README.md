@@ -17,30 +17,29 @@ the Hollyhock UI Library for its user interface.
 The ELF, BIN, and EXEC loaders remain separate from the UI. The launcher still
 produces run.bin and retains its existing linker/bootstrap arrangement.
 
-## Editing metadata after compilation
+## Metadata and embedded file paths
 
-The launcher displays metadata stored inside the compiled program, not
-necessarily the file's current filename. Renaming a `.bin` or `.hhk` file does
-not rename the program in the launcher when an embedded display name exists.
+There are two independent kinds of names:
 
-Use [`tools/hhkmeta.py`](../tools/hhkmeta.py) to inspect or edit the name,
-description, author, and version of an existing `.bin` or `.hhk` file without
-rebuilding it:
+- The launcher display name, description, author and version are embedded
+  metadata. Use [`tools/hhkmeta.py`](../tools/hhkmeta.py) to inspect or edit them.
+- Some programs contain a hard-coded calculator path such as
+  `\fls0\PythonExtra-hh2.bin`. Use [`tools/hhkrename.py`](../tools/hhkrename.py)
+  to rename the file and update that internal path together.
+
+Examples from the repository root:
 
 ```sh
 python3 tools/hhkmeta.py show application.bin
 python3 tools/hhkmeta.py set application.bin --name "New Display Name"
-python3 tools/hhkmeta.py rename PythonExtra-hh2.bin PythonExtra.bin
+python3 tools/hhkrename.py PythonExtra-hh2.bin PythonExtra.bin
 ```
 
-Run the commands from the repository root. The `set` command creates a
-`.patched.bin` or `.patched.hhk` output by default. The `rename` command
-uses the destination filename (without extension) as the embedded name, writes
-the new file and then removes the old path. It refuses to overwrite an
-existing destination. See the
-[compiled metadata guide](../doc/user/metadata.md) for all options, backup
-behavior, and format limitations. An edit is refused when the new value does
-not fit in the metadata space already reserved by the compiled file.
+The rename utility does not change launcher metadata. It preserves the volume
+prefix found in the binary (`fls0` or `drv0`), refuses to overwrite an existing
+destination, and stops if the replacement path does not fit in the existing
+zero-filled buffer. See the
+[compiled metadata and file-path guide](../doc/user/metadata.md) for details.
 
 ## UI controls
 

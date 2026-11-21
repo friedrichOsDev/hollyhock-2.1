@@ -40,11 +40,11 @@ A `.hhk` file with the name you specified in the `Makefile` will be generated, w
 
 Open the launcher and select your application to launch it. Have fun!
 
-**Important:** The launcher's display name comes from metadata embedded in the compiled program, not from the current filename. Renaming `myapp.hhk` to `Python.hhk`, for example, does not change an embedded `APP_NAME`. To inspect or change metadata after compilation, use the [compiled metadata guide](metadata.md) and `tools/hhkmeta.py`. This is useful when you only want to rename an already-built program and do not want to relink it.
+**Important:** The launcher's display name comes from metadata embedded in the compiled program, not from the current filename. Renaming `myapp.hhk` to `Python.hhk`, for example, does not change an embedded `APP_NAME`. To inspect or change launcher metadata after compilation, use the [compiled metadata guide](metadata.md) and `tools/hhkmeta.py`. To rename a file whose internal program path must match the physical filename, use the separate `tools/hhkrename.py` utility described there.
 
 When the filename and embedded name should be changed together, use the
 `rename` command. For example,
-`python3 tools/hhkmeta.py rename PythonExtra-hh2.bin PythonExtra.bin`
+`python3 tools/hhkrename.py PythonExtra-hh2.bin PythonExtra.bin`
 renames the file and sets its embedded display name to `PythonExtra`.
 
 

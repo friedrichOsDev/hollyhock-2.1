@@ -123,4 +123,4 @@ I (@The6P4C) have burned out *hard* on this project, and won't be maintaining it
 6. [Patching your firmware (from source)](doc/user/patching.md) (complicated, you do not need this, just scroll up to section [Install](#installation-simple))
 7. [Hollyhock UI Library](doc/ui-library/README.md) — build and API guide for the UI library.
 8. [Hollyhock Launcher](launcher/README.md) — UI-library-based launcher and independent build instructions.
-9. [Editing compiled program metadata](doc/user/metadata.md) — rename or update `.bin` and `.hhk` attributes without relinking.
+9. [Editing compiled metadata and embedded paths](doc/user/metadata.md) — update metadata or rename binaries with matching internal file paths.
