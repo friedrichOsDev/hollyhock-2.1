@@ -63,7 +63,7 @@ public:
         if (used > 22) return;
         void *p = malloc(sizeof(GUIButton));
         if (!p) return;
-        char *stable = CopyText(t);
+        char *stable = CopyText(text);
         if (!stable) { free(p); return; }
         GUIButton *button = new (p) GUIButton(
             x, y, right, bottom, stable, (uint16_t)id,
