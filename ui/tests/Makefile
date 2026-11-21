@@ -1,7 +1,9 @@
+SDK_DIR ?= ../../sdk
 UI_DIR ?= ..
 
 CXX := g++
-HOST_FLAGS := -std=c++11 -Wall -Wextra -Werror -I$(UI_DIR)/include
+HOST_FLAGS := -std=c++11 -Wall -Wextra -Werror \
+              -I$(UI_DIR)/include -I$(SDK_DIR)/include
 
 host-test: ui_api_test
 	./ui_api_test
