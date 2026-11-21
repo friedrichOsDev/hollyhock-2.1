@@ -88,7 +88,7 @@ From the repository root:
 ./app_template/build.sh
 ~~~
 
-The script cleans old artifacts, builds the SDK, builds the UI library, and builds the demo application.
+The script cleans old artifacts, builds the SDK, builds the UI library, and builds the demo application. The demo source is split between app_template/main.cpp and app_template/demo/demo.cpp; the app Makefile includes both.
 
 You can also build directly after building both libraries:
 
@@ -96,7 +96,7 @@ You can also build directly after building both libraries:
 make -C app_template SDK_DIR=../sdk UI_DIR=../ui all
 ~~~
 
-The all target creates app_template.hhk and app_template.bin. Use make -C app_template ... clean to remove application artifacts. The SDK and UI library have their own clean targets.
+The all target creates app_template.hhk and app_template.bin. The app Makefile includes C++ sources in the app_template root and its demo/ subdirectory. Use make -C app_template ... clean to remove application artifacts. The SDK and UI library have their own clean targets.
 
 ## 6. Run it on the calculator
 
