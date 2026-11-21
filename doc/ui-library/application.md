@@ -116,6 +116,7 @@ static void CustomFiles(UI::Application &app) {
 }
 
 UI::Config config;
+config.showFileSelector = true;
 config.fileSelectorRenderer = UI::MenuRenderer::Custom;
 config.onCustomFileSelector = CustomFiles;
 ~~~
@@ -163,7 +164,7 @@ The path is valid for the duration of the callback. A custom file browser can co
 A custom settings callback can retrieve the same Setting array used by the built-in renderer:
 
 ~~~cpp
-Setting *settings = app.GetSettings();
+UI::Setting *settings = app.GetSettings();
 int count = app.GetSettingCount();
 ~~~
 
