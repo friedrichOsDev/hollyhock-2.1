@@ -98,6 +98,24 @@ A Custom renderer without a callback safely falls back to Native. Custom callbac
 
 The built-in framebuffer main menu supports UP/DOWN, EXE, and touch. The framebuffer file selector supports UP/DOWN, LEFT/RIGHT page navigation, EXE, BACKSPACE to move to the parent directory, touch, and the action-bar Escape event. The framebuffer settings menu supports UP/DOWN, LEFT/RIGHT value changes, EXE, touch, and page navigation.
 
+## Custom main menu
+
+Use `MenuRenderer::Custom` when the application should fully own the main menu's drawing and input loop:
+
+~~~cpp
+static void CustomMainMenu(UI::Application &app) {
+    // Draw and poll events with Framebuffer and Input.
+    // Use app.OpenFileSelector(), app.OpenSettings(), or app.Close()
+    // to leave the custom main menu.
+}
+
+UI::Config config;
+config.mainMenuRenderer = UI::MenuRenderer::Custom;
+config.onCustomMainMenu = CustomMainMenu;
+~~~
+
+The callback must not simply return while the application remains in its main-menu state: that signals that the application is finished. When it requests another state, Application performs that transition and invokes the custom main-menu callback again when returning to the main menu.
+
 ## Custom file selector API
 
 A custom file selector can reuse the application's current directory and configured extension filters, then report a selected path through the central selection method:
