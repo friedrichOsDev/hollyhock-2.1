@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Decode and play CPV v1.0 files on a desktop using Tkinter."""
+"""Validate, decode, and preview CPV v1.0 global-palette video files."""
 
 from __future__ import annotations
 
@@ -8,33 +8,39 @@ import bisect
 import struct
 import sys
 import time
-from array import array
 from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO, Optional
 
+try:
+    import numpy as np
+except ImportError:
+    np = None
+
+
 MAGIC = b"CPV\0"
 VERSION_MAJOR = 1
 VERSION_MINOR = 0
-HEADER = struct.Struct("<4sHHIHHHHIIQI")
-FRAME_HEADER = struct.Struct("<BBHIII")
+
+HEADER = struct.Struct("<4sBBHIHHHHIHHIIII20s")
+FRAME_HEADER = struct.Struct("<4sBBHIII")
 INDEX_HEADER = struct.Struct("<4sI")
-INDEX_ENTRY = struct.Struct("<IIQ")
+INDEX_ENTRY = struct.Struct("<III")
 
 MAX_WIDTH = 528
 MAX_HEIGHT = 320
-ROOT_TILE_SIZE = 32
-MIN_TILE_SIZE = 8
-
-MODE_SOLID = 0x00
-MODE_PALETTE = 0x01
-MODE_RLE565 = 0x02
-MODE_RAW565 = 0x03
-MODE_SPLIT = 0x04
-MODE_SKIP = 0x05
+MAX_FPS = 30
+MAX_RUN_LENGTH = 8191
 
 FRAME_I = 0
 FRAME_P = 1
+
+OP_INDEX_LITERAL = 0
+OP_INDEX_REPEAT = 1
+OP_SKIP = 2
+OP_RAW565 = 3
+
+OP_NAMES = ("INDEX_LITERAL", "INDEX_REPEAT", "SKIP", "RAW565")
 
 
 class CPVError(Exception):
@@ -51,40 +57,20 @@ class FrameRecord:
     payload_offset: int
     start_ms: int
 
-
-class PayloadReader:
-    def __init__(self, payload: bytes):
-        self.data = payload
-        self.position = 0
-
     @property
-    def remaining(self) -> int:
-        return len(self.data) - self.position
-
-    def read_u8(self) -> int:
-        if self.remaining < 1:
-            raise CPVError("truncated tile payload (expected one byte)")
-        value = self.data[self.position]
-        self.position += 1
-        return value
-
-    def read_u16(self) -> int:
-        if self.remaining < 2:
-            raise CPVError("truncated tile payload (expected RGB565 word)")
-        value = self.data[self.position] | (self.data[self.position + 1] << 8)
-        self.position += 2
-        return value
-
-    def read_bytes(self, size: int) -> bytes:
-        if size < 0 or size > self.remaining:
-            raise CPVError("tile data extends beyond the frame payload")
-        start = self.position
-        self.position += size
-        return self.data[start:self.position]
+    def end_ms(self) -> int:
+        return self.start_ms + self.duration_ms
 
 
 class CPVFile:
+    """Random-access CPV file reader with strict structural validation."""
+
     def __init__(self, path: Path):
+        if np is None:
+            raise CPVError(
+                "NumPy is required by the desktop preview player. "
+                "On Arch/CachyOS install it with 'sudo pacman -S python-numpy'."
+            )
         self.path = path
         self.stream: BinaryIO = path.open("rb")
         self.file_size = path.stat().st_size
@@ -92,12 +78,17 @@ class CPVFile:
         self.height = 0
         self.fps_num = 0
         self.fps_den = 0
+        self.frame_count = 0
+        self.palette_count = 0
         self.total_duration_ms = 0
         self.frames: list[FrameRecord] = []
         self.keyframes: list[tuple[int, int, int]] = []
+        self.keyframe_times: list[int] = []
+        self.frame_starts: list[int] = []
+        self.palette = np.empty(0, dtype=np.uint16)
         self.last_decoded_frame = -1
         try:
-            self._read_header_and_index()
+            self._read_header_palette_and_index()
         except Exception:
             self.stream.close()
             raise
@@ -114,85 +105,114 @@ class CPVFile:
             raise CPVError(f"truncated {description}")
         return data
 
-    def _read_header_and_index(self) -> None:
-        if self.file_size < HEADER.size + INDEX_HEADER.size:
-            raise CPVError("file is too small to contain a CPV header and index")
+    def _read_header_palette_and_index(self) -> None:
+        if self.file_size < HEADER.size + 2 + INDEX_HEADER.size:
+            raise CPVError("file is too small to contain a CPV header, palette, and index")
+        if self.file_size > 0xFFFFFFFF:
+            raise CPVError("file exceeds the CPV v1 4 GiB file-size limit")
 
         fields = HEADER.unpack(self._read_exact_at(0, HEADER.size, "file header"))
-        (magic, major, minor, header_size, self.width, self.height,
-         self.fps_num, self.fps_den, frame_count, flags,
-         index_offset, self.total_duration_ms) = fields
+        (
+            magic, major, minor, header_size, flags,
+            self.width, self.height, self.fps_num, self.fps_den,
+            self.frame_count, self.palette_count, reserved0,
+            palette_offset, frames_offset, index_offset, self.total_duration_ms,
+            reserved1,
+        ) = fields
 
         if magic != MAGIC:
-            raise CPVError("invalid CPV magic; expected CPV\\0")
+            raise CPVError("invalid magic; expected CPV\\0")
         if (major, minor) != (VERSION_MAJOR, VERSION_MINOR):
-            raise CPVError(f"unsupported CPV version {major}.{minor}; this player supports 1.0")
+            raise CPVError(
+                f"unsupported CPV version {major}.{minor}; this player supports 1.0"
+            )
         if header_size != HEADER.size:
             raise CPVError(f"invalid file header size {header_size}; expected {HEADER.size}")
+        if flags != 0 or reserved0 != 0 or reserved1 != bytes(20):
+            raise CPVError("reserved file fields and flags must be zero in CPV v1")
         if not (1 <= self.width <= MAX_WIDTH and 1 <= self.height <= MAX_HEIGHT):
-            raise CPVError(f"invalid video dimensions {self.width}x{self.height}")
+            raise CPVError(f"invalid dimensions {self.width}x{self.height}")
         if self.fps_num == 0 or self.fps_den == 0:
             raise CPVError("frame-rate numerator and denominator must be non-zero")
-        if self.fps_num > 60 * self.fps_den:
-            raise CPVError("frame rate exceeds the CPV v1 maximum of 60 FPS")
-        if frame_count == 0:
+        if self.fps_num > MAX_FPS * self.fps_den:
+            raise CPVError(f"frame rate exceeds the CPV v1 maximum of {MAX_FPS} FPS")
+        if self.frame_count == 0:
             raise CPVError("frame_count must be greater than zero")
-        if flags != 0:
-            raise CPVError("reserved file flags must be zero in CPV v1.0")
+        if not (1 <= self.palette_count <= 256):
+            raise CPVError("palette_count must be in the range 1..256")
         if self.total_duration_ms == 0:
-            raise CPVError("total_duration_ms must be greater than zero")
-        if index_offset < header_size or index_offset > self.file_size - INDEX_HEADER.size:
+            raise CPVError("total duration must be greater than zero")
+        if palette_offset != HEADER.size:
+            raise CPVError(f"palette_offset must equal {HEADER.size}")
+        expected_frames_offset = palette_offset + self.palette_count * 2
+        if frames_offset != expected_frames_offset:
+            raise CPVError("frames_offset does not immediately follow the global palette")
+        if not (frames_offset < index_offset <= self.file_size - INDEX_HEADER.size):
             raise CPVError("index_offset is outside the valid frame/index region")
 
+        raw_palette = self._read_exact_at(
+            palette_offset, self.palette_count * 2, "global RGB565 palette"
+        )
+        self.palette = np.frombuffer(raw_palette, dtype="<u2").astype(np.uint16, copy=True)
+        if np.unique(self.palette).size != self.palette_count:
+            raise CPVError("global palette contains duplicate RGB565 entries")
+
         index_magic, index_count = INDEX_HEADER.unpack(
-            self._read_exact_at(index_offset, INDEX_HEADER.size, "frame index header")
+            self._read_exact_at(index_offset, INDEX_HEADER.size, "index header")
         )
         if index_magic != b"IDX1":
-            raise CPVError("invalid frame index magic; expected IDX1")
-        if index_count == 0:
-            raise CPVError("frame index must contain at least one keyframe")
-        expected_file_size = index_offset + INDEX_HEADER.size + index_count * INDEX_ENTRY.size
-        if expected_file_size != self.file_size:
-            raise CPVError("frame index size does not match the end of the file")
+            raise CPVError("invalid index magic; expected IDX1")
+        if index_count == 0 or index_count > self.frame_count:
+            raise CPVError("keyframe index entry count is invalid")
+        expected_size = index_offset + INDEX_HEADER.size + index_count * INDEX_ENTRY.size
+        if expected_size != self.file_size:
+            raise CPVError("keyframe index size does not match end-of-file")
 
-        raw_index = self._read_exact_at(
+        raw_entries = self._read_exact_at(
             index_offset + INDEX_HEADER.size,
             index_count * INDEX_ENTRY.size,
-            "frame index entries",
+            "keyframe index entries",
         )
-        stored_index = [
-            INDEX_ENTRY.unpack_from(raw_index, i * INDEX_ENTRY.size)
-            for i in range(index_count)
+        stored_entries = [
+            INDEX_ENTRY.unpack_from(raw_entries, offset)
+            for offset in range(0, len(raw_entries), INDEX_ENTRY.size)
         ]
 
-        # Parse every frame header and verify the index against the actual stream.
-        position = header_size
+        # Parse the frame sequence and independently reconstruct the expected index.
+        position = frames_offset
         elapsed_ms = 0
-        expected_keyframes: list[tuple[int, int, int]] = []
-        for number in range(frame_count):
+        expected_entries: list[tuple[int, int, int]] = []
+        for number in range(self.frame_count):
             if position > index_offset or FRAME_HEADER.size > index_offset - position:
-                raise CPVError(f"frame {number} header overlaps the frame index")
-            raw_header = self._read_exact_at(position, FRAME_HEADER.size, f"frame {number} header")
-            frame_type, frame_flags, header_size_value, duration_ms, payload_size, frame_number = FRAME_HEADER.unpack(raw_header)
+                raise CPVError(f"frame {number} header overlaps the keyframe index")
 
+            (
+                frame_magic, frame_type, frame_flags, frame_header_size,
+                frame_number, duration_ms, payload_size,
+            ) = FRAME_HEADER.unpack(
+                self._read_exact_at(position, FRAME_HEADER.size, f"frame {number} header")
+            )
+
+            if frame_magic != b"FRM1":
+                raise CPVError(f"frame {number} has invalid magic; expected FRM1")
             if frame_type not in (FRAME_I, FRAME_P):
-                raise CPVError(f"frame {number} has unknown frame type {frame_type}")
+                raise CPVError(f"frame {number} has unknown type {frame_type}")
             if frame_flags != 0:
                 raise CPVError(f"frame {number} has non-zero reserved flags")
-            if header_size_value != FRAME_HEADER.size:
-                raise CPVError(f"frame {number} has invalid header size {header_size_value}")
-            if duration_ms == 0:
-                raise CPVError(f"frame {number} has zero duration")
+            if frame_header_size != FRAME_HEADER.size:
+                raise CPVError(f"frame {number} has invalid header size")
             if frame_number != number:
                 raise CPVError(f"frame numbering error: expected {number}, found {frame_number}")
+            if duration_ms == 0:
+                raise CPVError(f"frame {number} has zero duration")
             if number == 0 and frame_type != FRAME_I:
                 raise CPVError("the first frame must be an I-frame")
 
             payload_offset = position + FRAME_HEADER.size
             if payload_offset > index_offset or payload_size > index_offset - payload_offset:
-                raise CPVError(f"frame {number} payload overlaps or exceeds the frame index")
+                raise CPVError(f"frame {number} payload overlaps or exceeds the index")
 
-            record = FrameRecord(
+            self.frames.append(FrameRecord(
                 number=number,
                 frame_type=frame_type,
                 duration_ms=duration_ms,
@@ -200,299 +220,310 @@ class CPVFile:
                 file_offset=position,
                 payload_offset=payload_offset,
                 start_ms=elapsed_ms,
-            )
-            self.frames.append(record)
+            ))
+
             if frame_type == FRAME_I:
-                expected_keyframes.append((number, elapsed_ms, position))
+                expected_entries.append((number, elapsed_ms, position))
 
             elapsed_ms += duration_ms
             if elapsed_ms > 0xFFFFFFFF:
-                raise CPVError("sum of frame durations exceeds the CPV uint32 limit")
+                raise CPVError("sum of frame durations exceeds the CPV v1 duration limit")
             position = payload_offset + payload_size
 
         if position != index_offset:
             raise CPVError("frame records do not end exactly at index_offset")
         if elapsed_ms != self.total_duration_ms:
             raise CPVError(
-                f"total duration mismatch: header says {self.total_duration_ms} ms, "
-                f"frames sum to {elapsed_ms} ms"
+                f"duration mismatch: header says {self.total_duration_ms} ms, "
+                f"frame records sum to {elapsed_ms} ms"
             )
-        if len(expected_keyframes) != index_count:
-            raise CPVError("frame index entry count does not match the number of I-frames")
+        if len(expected_entries) != index_count:
+            raise CPVError("index entry count does not match the number of I-frames")
 
         previous_number = previous_time = previous_offset = -1
-        for i, entry in enumerate(stored_index):
-            number, start_ms, file_offset = entry
-            if number <= previous_number or start_ms <= previous_time or file_offset <= previous_offset:
-                raise CPVError("frame index entries are not strictly increasing")
-            if entry != expected_keyframes[i]:
-                raise CPVError(f"frame index entry {i} does not match its I-frame")
-            previous_number, previous_time, previous_offset = number, start_ms, file_offset
-        if stored_index[0][0] != 0 or stored_index[0][1] != 0:
-            raise CPVError("the first frame-index entry must point to frame 0 at time 0")
+        for index, entry in enumerate(stored_entries):
+            number, elapsed, offset = entry
+            if number <= previous_number or elapsed <= previous_time or offset <= previous_offset:
+                raise CPVError("keyframe index entries are not strictly increasing")
+            if entry != expected_entries[index]:
+                raise CPVError(f"keyframe index entry {index} does not match its I-frame")
+            previous_number, previous_time, previous_offset = number, elapsed, offset
 
-        self.keyframes = stored_index
+        if stored_entries[0] != (0, 0, self.frames[0].file_offset):
+            raise CPVError("the first keyframe index entry must reference frame 0 at time 0")
 
-    def _decode_node(self, reader: PayloadReader, framebuffer: array,
-                     x: int, y: int, size: int, frame_type: int) -> None:
-        if x >= self.width or y >= self.height:
-            raise CPVError("internal tile traversal produced an out-of-image node")
-        visible_width = min(size, self.width - x)
-        visible_height = min(size, self.height - y)
-        pixel_count = visible_width * visible_height
-        mode = reader.read_u8()
+        self.keyframes = stored_entries
+        self.keyframe_times = [entry[1] for entry in stored_entries]
+        self.frame_starts = [record.start_ms for record in self.frames]
 
-        if mode == MODE_SOLID:
-            colour = reader.read_u16()
-            for row in range(visible_height):
-                start = (y + row) * self.width + x
-                framebuffer[start:start + visible_width] = array("H", [colour]) * visible_width
-            return
+    def _read_payload(self, record: FrameRecord) -> bytes:
+        return self._read_exact_at(
+            record.payload_offset, record.payload_size, f"frame {record.number} payload"
+        )
 
-        if mode == MODE_PALETTE:
-            palette_count = reader.read_u8() + 1
-            if not (2 <= palette_count <= 256):
-                raise CPVError("PALETTE colour count must be between 2 and 256")
-            if palette_count > pixel_count:
-                raise CPVError("PALETTE colour count exceeds the visible pixel count")
-            palette = [reader.read_u16() for _ in range(palette_count)]
-            bits_per_index = (palette_count - 1).bit_length()
-            packed_size = (pixel_count * bits_per_index + 7) // 8
-            packed = reader.read_bytes(packed_size)
-            unused_bits = packed_size * 8 - pixel_count * bits_per_index
-            if unused_bits and (packed[-1] >> (8 - unused_bits)) != 0:
-                raise CPVError("PALETTE unused high bits in the final byte must be zero")
+    @staticmethod
+    def _read_run_length(payload: memoryview, position: int, frame_number: int):
+        if position >= len(payload):
+            raise CPVError(f"frame {frame_number}: truncated packet header")
+        first = payload[position]
+        position += 1
+        opcode = first >> 6
+        if (first & 0x20) == 0:
+            run_length = (first & 0x1F) + 1
+        else:
+            if position >= len(payload):
+                raise CPVError(f"frame {frame_number}: truncated long packet header")
+            second = payload[position]
+            position += 1
+            run_length = ((first & 0x1F) << 8) | second
+            if not (33 <= run_length <= MAX_RUN_LENGTH):
+                raise CPVError(f"frame {frame_number}: invalid long run length {run_length}")
+        return opcode, run_length, position
 
-            mask = (1 << bits_per_index) - 1
-            for pixel_index in range(pixel_count):
-                bit_offset = pixel_index * bits_per_index
-                byte_index, shift = divmod(bit_offset, 8)
-                word = packed[byte_index]
-                if byte_index + 1 < len(packed):
-                    word |= packed[byte_index + 1] << 8
-                palette_index = (word >> shift) & mask
-                if palette_index >= palette_count:
-                    raise CPVError("PALETTE index refers to an unavailable colour")
-                row, column = divmod(pixel_index, visible_width)
-                framebuffer[(y + row) * self.width + x + column] = palette[palette_index]
-            return
-
-        if mode == MODE_RLE565:
-            produced = 0
-            while produced < pixel_count:
-                control = reader.read_u8()
-                count = (control & 0x7F) + 1
-                if count > pixel_count - produced:
-                    raise CPVError("RLE565 token expands beyond the tile pixel count")
-                if control & 0x80:
-                    colour = reader.read_u16()
-                    for offset in range(produced, produced + count):
-                        row, column = divmod(offset, visible_width)
-                        framebuffer[(y + row) * self.width + x + column] = colour
-                else:
-                    byte_count = count * 2
-                    literal = reader.read_bytes(byte_count)
-                    for i in range(count):
-                        colour = literal[i * 2] | (literal[i * 2 + 1] << 8)
-                        offset = produced + i
-                        row, column = divmod(offset, visible_width)
-                        framebuffer[(y + row) * self.width + x + column] = colour
-                produced += count
-            return
-
-        if mode == MODE_RAW565:
-            raw = reader.read_bytes(pixel_count * 2)
-            decoded = array("H")
-            decoded.frombytes(raw)
-            if sys.byteorder != "little":
-                decoded.byteswap()
-            for row in range(visible_height):
-                src = row * visible_width
-                dst = (y + row) * self.width + x
-                framebuffer[dst:dst + visible_width] = decoded[src:src + visible_width]
-            return
-
-        if mode == MODE_SPLIT:
-            if size <= MIN_TILE_SIZE:
-                raise CPVError("SPLIT is not valid for an 8x8 tile")
-            half = size // 2
-            children = (
-                (x, y),
-                (x + half, y),
-                (x, y + half),
-                (x + half, y + half),
-            )
-            for child_x, child_y in children:
-                if child_x < self.width and child_y < self.height:
-                    self._decode_node(reader, framebuffer, child_x, child_y, half, frame_type)
-            return
-
-        if mode == MODE_SKIP:
-            if frame_type != FRAME_P:
-                raise CPVError("SKIP is only valid in a P-frame")
-            return
-
-        raise CPVError(f"unknown tile mode 0x{mode:02X}")
-
-    def decode_frame(self, frame_number: int, framebuffer: array) -> FrameRecord:
+    def decode_frame(self, frame_number: int, framebuffer):
         if not (0 <= frame_number < len(self.frames)):
             raise CPVError("requested frame is outside the video")
         record = self.frames[frame_number]
         if record.frame_type == FRAME_P and self.last_decoded_frame != frame_number - 1:
-            raise CPVError("P-frame requires its immediately preceding frame to be decoded first")
-        payload = self._read_exact_at(record.payload_offset, record.payload_size,
-                                      f"frame {frame_number} payload")
-        reader = PayloadReader(payload)
-
-        for y in range(0, self.height, ROOT_TILE_SIZE):
-            for x in range(0, self.width, ROOT_TILE_SIZE):
-                self._decode_node(reader, framebuffer, x, y, ROOT_TILE_SIZE, record.frame_type)
-
-        if reader.position != len(payload):
             raise CPVError(
-                f"frame {frame_number} payload has {reader.remaining} unconsumed trailing bytes"
+                f"P-frame {frame_number} requires frame {frame_number - 1} "
+                "to be decoded immediately before it"
             )
+
+        payload_bytes = self._read_payload(record)
+        payload = memoryview(payload_bytes)
+        payload_position = 0
+        pixel_position = 0
+        pixel_count = self.width * self.height
+
+        while payload_position < len(payload):
+            opcode, run_length, payload_position = self._read_run_length(
+                payload, payload_position, frame_number
+            )
+            if run_length > pixel_count - pixel_position:
+                raise CPVError(f"frame {frame_number}: packet exceeds frame pixel count")
+            end = pixel_position + run_length
+
+            if opcode == OP_INDEX_LITERAL:
+                data_end = payload_position + run_length
+                if data_end > len(payload):
+                    raise CPVError(f"frame {frame_number}: truncated INDEX_LITERAL data")
+                indices = np.frombuffer(
+                    payload_bytes, dtype=np.uint8, count=run_length, offset=payload_position
+                )
+                if indices.size and int(indices.max()) >= self.palette_count:
+                    raise CPVError(f"frame {frame_number}: INDEX_LITERAL has invalid palette index")
+                framebuffer[pixel_position:end] = self.palette[indices]
+                payload_position = data_end
+
+            elif opcode == OP_INDEX_REPEAT:
+                if payload_position >= len(payload):
+                    raise CPVError(f"frame {frame_number}: truncated INDEX_REPEAT data")
+                palette_index = int(payload[payload_position])
+                payload_position += 1
+                if palette_index >= self.palette_count:
+                    raise CPVError(f"frame {frame_number}: INDEX_REPEAT has invalid palette index")
+                framebuffer[pixel_position:end] = self.palette[palette_index]
+
+            elif opcode == OP_SKIP:
+                if record.frame_type != FRAME_P:
+                    raise CPVError(f"frame {frame_number}: SKIP is invalid in an I-frame")
+
+            elif opcode == OP_RAW565:
+                byte_count = run_length * 2
+                data_end = payload_position + byte_count
+                if data_end > len(payload):
+                    raise CPVError(f"frame {frame_number}: truncated RAW565 data")
+                raw_values = np.frombuffer(
+                    payload_bytes, dtype="<u2", count=run_length, offset=payload_position
+                )
+                framebuffer[pixel_position:end] = raw_values
+                payload_position = data_end
+
+            else:
+                raise CPVError(f"frame {frame_number}: unknown packet opcode {opcode}")
+
+            pixel_position = end
+
+        if pixel_position != pixel_count:
+            raise CPVError(
+                f"frame {frame_number}: packet stream covers {pixel_position} "
+                f"of {pixel_count} pixels"
+            )
+        if payload_position != len(payload):
+            raise CPVError(f"frame {frame_number}: unconsumed payload bytes")
+
         self.last_decoded_frame = frame_number
         return record
 
-    def seek_frame(self, target_frame: int, framebuffer: array) -> FrameRecord:
-        if not (0 <= target_frame < len(self.frames)):
-            raise CPVError("requested frame is outside the video")
-        keyframe_numbers = [entry[0] for entry in self.keyframes]
-        keyframe_index = bisect.bisect_right(keyframe_numbers, target_frame) - 1
+    def seek_time(self, target_ms: int, framebuffer):
+        """Decode from the nearest keyframe to the frame containing target_ms."""
+        target_ms = max(0, min(self.total_duration_ms - 1, int(target_ms)))
+        keyframe_index = bisect.bisect_right(self.keyframe_times, target_ms) - 1
         if keyframe_index < 0:
-            raise CPVError("no keyframe is available before the requested frame")
-        start_frame = keyframe_numbers[keyframe_index]
-        result: Optional[FrameRecord] = None
-        for number in range(start_frame, target_frame + 1):
-            result = self.decode_frame(number, framebuffer)
-        assert result is not None
-        return result
+            raise CPVError("no keyframe exists before the requested time")
 
-    def to_rgb_bytes(self, framebuffer: array) -> bytes:
-        rgb = bytearray(len(framebuffer) * 3)
-        out = 0
-        for value in framebuffer:
-            r5 = (value >> 11) & 31
-            g6 = (value >> 5) & 63
-            b5 = value & 31
-            rgb[out] = (r5 << 3) | (r5 >> 2)
-            rgb[out + 1] = (g6 << 2) | (g6 >> 4)
-            rgb[out + 2] = (b5 << 3) | (b5 >> 2)
-            out += 3
-        return bytes(rgb)
+        first_frame = self.keyframes[keyframe_index][0]
+        target_frame = bisect.bisect_right(self.frame_starts, target_ms) - 1
+        target_frame = max(first_frame, target_frame)
+
+        result: Optional[FrameRecord] = None
+        for number in range(first_frame, target_frame + 1):
+            result = self.decode_frame(number, framebuffer)
+        if result is None:
+            raise CPVError("seeking did not decode a frame")
+        return result
 
 
 class CPVPlayer:
     def __init__(self, cpv: CPVFile):
         try:
             import tkinter as tk
+            from tkinter import messagebox
         except ImportError as exc:
-            raise RuntimeError("Tkinter is not available; install your system's python-tk package") from exc
+            raise RuntimeError(
+                "Tkinter is not available. On Arch/CachyOS install it with "
+                "'sudo pacman -S tk'."
+            ) from exc
 
         self.tk = tk
+        self.messagebox = messagebox
         self.cpv = cpv
-        self.framebuffer = array("H", [0]) * (cpv.width * cpv.height)
+        self.framebuffer = np.zeros(cpv.width * cpv.height, dtype=np.uint16)
         self.current_frame = -1
+        self.current_time_ms = 0
         self.playing = False
         self.after_id: Optional[str] = None
         self.deadline = 0.0
         self.remaining_ms = 0
         self.photo = None
+        self.closed = False
 
         try:
             self.root = tk.Tk()
         except tk.TclError as exc:
-            raise RuntimeError(f"cannot open the desktop window (is a graphical session available?): {exc}") from exc
+            raise RuntimeError(
+                f"cannot open the preview window (is a graphical session available?): {exc}"
+            ) from exc
+
         self.root.title(f"CPV Player — {cpv.path.name}")
         self.root.resizable(False, False)
         self.root.protocol("WM_DELETE_WINDOW", self.close)
         self.root.bind("<space>", lambda _event: self.toggle_playback())
         self.root.bind("<Left>", lambda _event: self.seek_relative(-1000))
         self.root.bind("<Right>", lambda _event: self.seek_relative(1000))
+        self.root.bind("<Home>", lambda _event: self.seek_absolute(0))
+        self.root.bind("<End>", lambda _event: self.seek_absolute(cpv.total_duration_ms - 1))
 
         self.image_label = tk.Label(self.root, borderwidth=0)
         self.image_label.pack(padx=8, pady=(8, 4))
 
         controls = tk.Frame(self.root)
         controls.pack(fill="x", padx=8, pady=(0, 4))
-        self.back_button = tk.Button(controls, text="−1 s", width=7,
-                                     command=lambda: self.seek_relative(-1000))
+
+        self.back_button = tk.Button(
+            controls, text="−1 s", width=7, command=lambda: self.seek_relative(-1000)
+        )
         self.back_button.pack(side="left")
-        self.play_button = tk.Button(controls, text="Pause", width=9,
-                                     command=self.toggle_playback)
+
+        self.play_button = tk.Button(
+            controls, text="Pause", width=9, command=self.toggle_playback
+        )
         self.play_button.pack(side="left", padx=6)
-        self.forward_button = tk.Button(controls, text="+1 s", width=7,
-                                        command=lambda: self.seek_relative(1000))
+
+        self.forward_button = tk.Button(
+            controls, text="+1 s", width=7, command=lambda: self.seek_relative(1000)
+        )
         self.forward_button.pack(side="left")
+
         self.status = tk.Label(self.root, anchor="w")
         self.status.pack(fill="x", padx=10, pady=(0, 8))
 
-        self.show_frame(0)
+        self.show_time(0)
         self.start_playback()
 
-    def _format_time(self, milliseconds: int) -> str:
+    @staticmethod
+    def _format_time(milliseconds: int) -> str:
         seconds = max(0, milliseconds) // 1000
         tenths = (max(0, milliseconds) % 1000) // 100
         return f"{seconds // 60:02d}:{seconds % 60:02d}.{tenths}"
 
     def _render(self) -> None:
+        pixels = self.framebuffer
+        rgb = np.empty((self.cpv.height, self.cpv.width, 3), dtype=np.uint8)
+        values = pixels.reshape(self.cpv.height, self.cpv.width)
+
+        red = ((values >> 11) & 31).astype(np.uint8)
+        green = ((values >> 5) & 63).astype(np.uint8)
+        blue = (values & 31).astype(np.uint8)
+
+        rgb[:, :, 0] = (red << 3) | (red >> 2)
+        rgb[:, :, 1] = (green << 2) | (green >> 4)
+        rgb[:, :, 2] = (blue << 3) | (blue >> 2)
+
         ppm = (
             f"P6\n{self.cpv.width} {self.cpv.height}\n255\n".encode("ascii")
-            + self.cpv.to_rgb_bytes(self.framebuffer)
+            + rgb.tobytes()
         )
-        # PPM (P6) contains arbitrary binary pixel bytes. Pass the raw bytes
-        # to Tk; base64 image data is only reliably supported for PNG/GIF.
+        # Tk accepts binary PPM bytes. Do not base64-wrap this payload:
+        # Tk's PPM loader expects the P6 header followed by raw pixel bytes.
         self.photo = self.tk.PhotoImage(data=ppm, format="PPM")
         self.image_label.configure(image=self.photo)
+
         record = self.cpv.frames[self.current_frame]
-        time_text = self._format_time(record.start_ms)
-        total_text = self._format_time(self.cpv.total_duration_ms)
         self.status.configure(
-            text=f"Frame {self.current_frame + 1}/{len(self.cpv.frames)}   "
-                 f"{self.cpv.width}×{self.cpv.height}   {time_text} / {total_text}"
+            text=(
+                f"Frame {self.current_frame + 1}/{len(self.cpv.frames)}   "
+                f"{self.cpv.width}×{self.cpv.height}   "
+                f"{self._format_time(record.start_ms)} / "
+                f"{self._format_time(self.cpv.total_duration_ms)}"
+            )
         )
 
-    def show_frame(self, frame_number: int, seek: bool = True) -> None:
-        if seek:
-            self.cpv.seek_frame(frame_number, self.framebuffer)
-        else:
-            self.cpv.decode_frame(frame_number, self.framebuffer)
-        self.current_frame = frame_number
-        self.remaining_ms = self.cpv.frames[frame_number].duration_ms
+    def show_time(self, target_ms: int) -> None:
+        record = self.cpv.seek_time(target_ms, self.framebuffer)
+        self.current_frame = record.number
+        self.current_time_ms = record.start_ms
+        self.remaining_ms = max(1, record.end_ms - max(record.start_ms, target_ms))
         self._render()
-        if self.playing:
-            self._schedule_next(self.remaining_ms)
+
+    def show_next_frame(self) -> None:
+        next_number = self.current_frame + 1
+        if next_number >= len(self.cpv.frames):
+            self.playing = False
+            self.play_button.configure(text="Play")
+            self.remaining_ms = 0
+            return
+        record = self.cpv.decode_frame(next_number, self.framebuffer)
+        self.current_frame = record.number
+        self.current_time_ms = record.start_ms
+        self.remaining_ms = record.duration_ms
+        self._render()
 
     def _schedule_next(self, delay_ms: int) -> None:
         if self.after_id is not None:
             self.root.after_cancel(self.after_id)
             self.after_id = None
-        self.remaining_ms = max(1, delay_ms)
-        self.deadline = time.monotonic() + self.remaining_ms / 1000.0
-        self.after_id = self.root.after(self.remaining_ms, self._advance)
+        delay_ms = max(1, int(delay_ms))
+        self.remaining_ms = delay_ms
+        self.deadline = time.monotonic() + delay_ms / 1000.0
+        self.after_id = self.root.after(delay_ms, self._advance)
 
     def _advance(self) -> None:
         self.after_id = None
-        if not self.playing:
-            return
-        next_frame = self.current_frame + 1
-        if next_frame >= len(self.cpv.frames):
-            self.playing = False
-            self.play_button.configure(text="Play")
-            self.remaining_ms = 0
+        if not self.playing or self.closed:
             return
         try:
-            # Normal playback is sequential: decode only the next record.
-            self.show_frame(next_frame, seek=False)
-        except CPVError as exc:
+            self.show_next_frame()
+            if self.playing:
+                self._schedule_next(self.remaining_ms)
+        except (CPVError, OSError) as exc:
             self.pause_playback()
-            from tkinter import messagebox
-            messagebox.showerror("CPV decoding error", str(exc), parent=self.root)
+            self.messagebox.showerror("CPV decoding error", str(exc), parent=self.root)
 
     def start_playback(self) -> None:
         if self.current_frame >= len(self.cpv.frames) - 1:
-            self.show_frame(0)
+            self.show_time(0)
         self.playing = True
         self.play_button.configure(text="Pause")
         self._schedule_next(self.remaining_ms or self.cpv.frames[self.current_frame].duration_ms)
@@ -511,31 +542,34 @@ class CPVPlayer:
         else:
             self.start_playback()
 
-    def seek_relative(self, delta_ms: int) -> None:
-        current = self.cpv.frames[self.current_frame]
-        target_ms = max(0, min(self.cpv.total_duration_ms - 1, current.start_ms + delta_ms))
-        frame_starts = [record.start_ms for record in self.cpv.frames]
-        target = max(0, bisect.bisect_right(frame_starts, target_ms) - 1)
+    def seek_absolute(self, target_ms: int) -> None:
         was_playing = self.playing
         if self.after_id is not None:
             self.root.after_cancel(self.after_id)
             self.after_id = None
         self.playing = False
         try:
-            self.show_frame(target)
-        except CPVError as exc:
-            self.playing = False
-            self.play_button.configure(text="Play")
-            from tkinter import messagebox
-            messagebox.showerror("CPV decoding error", str(exc), parent=self.root)
-            return
+            self.show_time(target_ms)
+        except (CPVError, OSError) as exc:
+            self.messagebox.showerror("CPV seeking error", str(exc), parent=self.root)
         self.playing = was_playing
         if was_playing:
+            self.play_button.configure(text="Pause")
             self._schedule_next(self.remaining_ms)
         else:
             self.play_button.configure(text="Play")
 
+    def seek_relative(self, delta_ms: int) -> None:
+        if self.current_frame < 0:
+            return
+        # Use the current displayed frame's start. This makes seeks deterministic
+        # and avoids depending on Tk event-loop scheduling jitter.
+        self.seek_absolute(self.cpv.frames[self.current_frame].start_ms + delta_ms)
+
     def close(self) -> None:
+        if self.closed:
+            return
+        self.closed = True
         if self.after_id is not None:
             self.root.after_cancel(self.after_id)
             self.after_id = None
@@ -546,7 +580,7 @@ class CPVPlayer:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Play a CPV v1.0 video on the desktop.")
+    parser = argparse.ArgumentParser(description="Play and inspect CPV v1.0 video files.")
     parser.add_argument("cpv_file", help="input .cpv file")
     return parser
 
@@ -561,9 +595,16 @@ def main() -> int:
     cpv: Optional[CPVFile] = None
     try:
         cpv = CPVFile(path)
+        print(
+            f"CPV v1.0: {cpv.width}x{cpv.height}, "
+            f"{cpv.fps_num}/{cpv.fps_den} FPS, "
+            f"{len(cpv.frames)} stored frames, "
+            f"{cpv.total_duration_ms / 1000:.3f} s, "
+            f"palette {cpv.palette_count}"
+        )
         player = CPVPlayer(cpv)
         player.run()
-    except (OSError, CPVError, RuntimeError, struct.error) as exc:
+    except (OSError, CPVError, RuntimeError, struct.error, OverflowError) as exc:
         print(f"play.py: error: {exc}", file=sys.stderr)
         return 1
     finally:
