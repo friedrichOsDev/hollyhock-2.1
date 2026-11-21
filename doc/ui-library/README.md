@@ -4,11 +4,11 @@ The Hollyhock UI Library is a small C++ helper library for applications built wi
 
 ## Documentation
 
-- Demo walkthrough — the calculator demo and its read-only browser workflow.
-- Getting started — toolchain requirements, build steps, linking, and a minimal application.
-- Application menus and settings — configuration, callbacks, navigation, settings, and automatic MCS persistence.
-- File system API — normalized paths, read-only file access, directories, filters, and errors.
-- API reference — public classes, methods, and data types.
+- [Demo walkthrough](demo-walkthrough.md) — the calculator demo and its read-only browser workflow.
+- [Getting started](getting-started.md) — toolchain requirements, build steps, linking, and a minimal application.
+- [Application menus and settings](application.md) — configuration, callbacks, navigation, settings, and automatic MCS persistence.
+- [File system API](filesystem.md) — normalized paths, read-only file access, directories, filters, and errors.
+- [API reference](api-reference.md) — public classes, methods, and data types.
 
 ## Features
 
