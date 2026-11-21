@@ -1,8 +1,11 @@
-#include <stdio.h>
 #include <stdint.h>
 
 #include <ui/filesystem.hpp>
 #include <ui/types.hpp>
+
+// Include stdio after the SDK: it defines SEEK_SET/SEEK_CUR/SEEK_END macros,
+// which otherwise collide with the SDK's identically named constants.
+#include <stdio.h>
 
 namespace {
 
