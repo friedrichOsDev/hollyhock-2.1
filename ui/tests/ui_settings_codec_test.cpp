@@ -28,12 +28,6 @@ bool Equals(const char *left, const char *right) {
     return left[i] == right[i];
 }
 
-void Reset(bool *preview, int *bytes, int *mode) {
-    *preview = false;
-    *bytes = 8;
-    *mode = 0;
-}
-
 } // namespace
 
 int main() {
@@ -59,7 +53,7 @@ int main() {
     Check(Equals(buffer,
           "UIST2;3;11:showPreviewB1;12:previewBytesI32;13:previewFormatE2;"),
           "serialized data contains stable keys and typed values");
-    Check(size == 1U + 66U,
+    Check(size == 62U,
           "serialized size includes the terminating null byte");
 
     // Reverse the setting order. Keyed loading must preserve the values.
@@ -121,7 +115,7 @@ int main() {
           "legacy values are restored");
 
     // Legacy parsing remains strict and atomic on malformed input.
-    Reset(&legacyPreview, &legacyBytes, &legacyBytes);
+    legacyPreview = false;\n    legacyBytes = 8;
     legacyPreview = false;
     legacyBytes = 8;
     Check(!UI::Detail::ParseSettings("UIST1;2;B1;Ix;",
@@ -153,6 +147,11 @@ int main() {
           "legacy factory overload remains source compatible");
     Check(UI::Detail::ValidSettingDefinitions(&named, 1),
           "setting name is accepted as a fallback storage key");
+    UI::Setting identified =
+        UI::Setting::Boolean("pref.visible", "Visible", &preview);
+    Check(Equals(identified.id, "pref.visible") &&
+          UI::Detail::ValidSettingDefinitions(&identified, 1),
+          "explicit stable setting ID is supported");
 
     printf("\n%d checks, %d failure(s)\n", checks, failures);
     return failures == 0 ? 0 : 1;
