@@ -214,6 +214,13 @@ int main() {
           config.fileSelectorRenderer == UI::MenuRenderer::Custom &&
           config.settingsRenderer == UI::MenuRenderer::Native,
           "renderer modes can be configured independently");
+    config.onCustomMainMenu = DummyAction;
+    config.onCustomFileSelector = DummyAction;
+    config.onCustomSettings = DummyAction;
+    Check(config.onCustomMainMenu == DummyAction &&
+          config.onCustomFileSelector == DummyAction &&
+          config.onCustomSettings == DummyAction,
+          "custom callbacks are configurable per menu");
 
     char path[256];
     Check(UI::FileSystem::NormalizePath(
