@@ -1237,26 +1237,35 @@ bool Application::RunFramebufferFileSelector() {
     int selected = 0;
     bool done = false;
 
+    const int rowTop = 64;
+    const int rowHeight = 32;
+    const int footerY = screen.Height() - 36;
+    int rowsPerPage = (footerY - rowTop - 4) / rowHeight;
+    if (rowsPerPage > ROWS)
+        rowsPerPage = ROWS;
+    if (rowsPerPage < 1)
+        rowsPerPage = 1;
+
     screen.Clear(Colors::White);
     screen.DrawText(8, 12, "Scanning files...", Colors::Blue);
     screen.Present();
     Scan(m_currentDirectory, m_config, entries, &count);
 
     while (!done && m_state == StateFileSelector) {
-        int pages = (count + ROWS - 1) / ROWS;
+        int pages = (count + rowsPerPage - 1) / rowsPerPage;
         if (pages < 1)
             pages = 1;
         if (selected < 0)
             selected = 0;
         if (selected >= count && count > 0)
             selected = count - 1;
-        int page = selected / ROWS;
+        int page = selected / rowsPerPage;
         if (page >= pages)
             page = pages - 1;
-        const int first = page * ROWS;
+        const int first = page * rowsPerPage;
         int visible = count - first;
-        if (visible > ROWS)
-            visible = ROWS;
+        if (visible > rowsPerPage)
+            visible = rowsPerPage;
 
         screen.Clear(Colors::White);
         screen.FillRect(0, 0, screen.Width(), 32, Colors::Black);
@@ -1264,8 +1273,6 @@ bool Application::RunFramebufferFileSelector() {
         screen.DrawText(8, 40, m_currentDirectory, Colors::Blue);
         screen.DrawLine(8, 54, screen.Width() - 8, 54, Colors::Gray);
 
-        const int rowTop = 64;
-        const int rowHeight = 32;
         for (int row = 0; row < visible; ++row) {
             const int index = first + row;
             const int y = rowTop + row * rowHeight;
@@ -1293,7 +1300,6 @@ bool Application::RunFramebufferFileSelector() {
             screen.DrawText(12, rowTop + 8, "No matching entries",
                             Colors::Gray);
 
-        const int footerY = screen.Height() - 36;
         int buttonWidth = screen.Width() / 4;
         if (buttonWidth < 1)
             buttonWidth = 1;
@@ -1339,12 +1345,12 @@ bool Application::RunFramebufferFileSelector() {
                 }
                 if (event.keyCode == KeyLeft) {
                     if (page > 0)
-                        selected = (page - 1) * ROWS;
+                        selected = (page - 1) * rowsPerPage;
                     break;
                 }
                 if (event.keyCode == KeyRight) {
-                    if ((page + 1) * ROWS < count)
-                        selected = (page + 1) * ROWS;
+                    if ((page + 1) * rowsPerPage < count)
+                        selected = (page + 1) * rowsPerPage;
                     break;
                 }
                 if (event.keyCode == KeyBackspace) {
@@ -1362,7 +1368,7 @@ bool Application::RunFramebufferFileSelector() {
             } else if (event.type == EventTouch &&
                        event.touchAction == TouchDown) {
                 const int y = event.y;
-                if (y >= rowTop && y < rowTop + ROWS * rowHeight) {
+                if (y >= rowTop && y < rowTop + rowsPerPage * rowHeight) {
                     const int row = (y - rowTop) / rowHeight;
                     const int index = first + row;
                     if (row < visible && index < count) {
@@ -1385,8 +1391,8 @@ bool Application::RunFramebufferFileSelector() {
             if (page > 0)
                 selected = (page - 1) * ROWS;
         } else if (footerAction == 1) {
-            if ((page + 1) * ROWS < count)
-                selected = (page + 1) * ROWS;
+            if ((page + 1) * rowsPerPage < count)
+                selected = (page + 1) * rowsPerPage;
         } else if (footerAction == 2) {
             goParent = true;
         } else if (footerAction == 3) {
@@ -1457,27 +1463,35 @@ bool Application::RunFramebufferSettings() {
 
     int selected = 0;
     bool done = false;
+    const int rowTop = 50;
+    const int rowHeight = 34;
+    const int footerY = screen.Height() - 34;
+    const int descriptionY = footerY - 10;
+    int rowsPerPage = (descriptionY - rowTop - 4) / rowHeight;
+    if (rowsPerPage > ROWS)
+        rowsPerPage = ROWS;
+    if (rowsPerPage < 1)
+        rowsPerPage = 1;
+
     while (!done && m_state == StateSettings) {
-        int pages = (m_config.settingCount + ROWS - 1) / ROWS;
+        int pages = (m_config.settingCount + rowsPerPage - 1) / rowsPerPage;
         if (pages < 1)
             pages = 1;
         if (selected < 0)
             selected = 0;
         if (selected >= m_config.settingCount)
             selected = m_config.settingCount - 1;
-        const int page = selected / ROWS;
-        const int first = page * ROWS;
+        const int page = selected / rowsPerPage;
+        const int first = page * rowsPerPage;
         int visible = m_config.settingCount - first;
-        if (visible > ROWS)
-            visible = ROWS;
+        if (visible > rowsPerPage)
+            visible = rowsPerPage;
 
         screen.Clear(Colors::White);
         screen.FillRect(0, 0, screen.Width(), 32, Colors::Black);
         screen.DrawText(8, 10, "Settings", Colors::White);
         screen.DrawLine(8, 42, screen.Width() - 8, 42, Colors::Gray);
 
-        const int rowTop = 50;
-        const int rowHeight = 34;
         for (int row = 0; row < visible; ++row) {
             const int index = first + row;
             const Setting &setting = m_config.settings[index];
@@ -1501,10 +1515,9 @@ bool Application::RunFramebufferSettings() {
             }
         }
 
-        const int footerY = screen.Height() - 34;
         const Setting &current = m_config.settings[selected];
         if (current.description && current.description[0])
-            screen.DrawText(8, footerY - 10, current.description, Colors::Gray);
+            screen.DrawText(8, descriptionY, current.description, Colors::Gray);
         int buttonWidth = screen.Width() / 3;
         if (buttonWidth < 1)
             buttonWidth = 1;
@@ -1565,7 +1578,7 @@ bool Application::RunFramebufferSettings() {
             } else if (event.type == EventTouch &&
                        event.touchAction == TouchDown) {
                 if (event.y >= rowTop &&
-                    event.y < rowTop + ROWS * rowHeight) {
+                    event.y < rowTop + rowsPerPage * rowHeight) {
                     const int row = (event.y - rowTop) / rowHeight;
                     if (row < visible) {
                         selected = first + row;
@@ -1584,12 +1597,12 @@ bool Application::RunFramebufferSettings() {
             break;
         if (footerAction == 0) {
             if (page > 0)
-                selected = (page - 1) * ROWS;
+                selected = (page - 1) * rowsPerPage;
             continue;
         }
         if (footerAction == 1) {
-            if ((page + 1) * ROWS < m_config.settingCount)
-                selected = (page + 1) * ROWS;
+            if ((page + 1) * rowsPerPage < m_config.settingCount)
+                selected = (page + 1) * rowsPerPage;
             continue;
         }
         if (footerAction == 2) {
