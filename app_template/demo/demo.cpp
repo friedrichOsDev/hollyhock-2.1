@@ -116,6 +116,45 @@ bool IsBackEvent(const UI::Event &event) {
             event.keyCode == UI::KeyPowerClear);
 }
 
+void BuildPreview(const char *source, int length, int format,
+                  char *output, int capacity) {
+    static const char hexDigits[] = "0123456789ABCDEF";
+    int position = 0;
+    int column = 0;
+    if (!output || capacity <= 0)
+        return;
+
+    output[0] = 0;
+    for (int index = 0; index < length && position < capacity - 1; ++index) {
+        if (format == 1) {
+            if (column == 16) {
+                output[position++] = '\\n';
+                column = 0;
+            } else if (column > 0) {
+                output[position++] = ' ';
+            }
+            if (position + 2 >= capacity)
+                break;
+            const unsigned char value =
+                static_cast<unsigned char>(source[index]);
+            output[position++] = hexDigits[(value >> 4) & 0x0F];
+            output[position++] = hexDigits[value & 0x0F];
+            ++column;
+        } else {
+            if (column == 48) {
+                output[position++] = '\\n';
+                column = 0;
+            }
+            const unsigned char value =
+                static_cast<unsigned char>(source[index]);
+            output[position++] = (value >= 32 && value <= 126)
+                ? static_cast<char>(value) : ' ';
+            ++column;
+        }
+    }
+    output[position] = 0;
+}
+
 void DrawHeader(UI::Framebuffer &screen, const char *title,
                 const char *subtitle) {
     screen.Clear(UI::RGB(244, 247, 251));
@@ -395,7 +434,7 @@ void DrawCustomSettings(UI::Framebuffer &screen,
 void DemoResetSettings(UI::Application &app) {
     g_demoSettings.showPreview = true;
     g_demoSettings.previewBytes = 32;
-    g_demoSettings.letterCase = 0;
+    g_demoSettings.previewFormat = 0;
     g_demoSettings.showFileSize = true;
     app.ReturnToMenu();
 }
@@ -500,7 +539,9 @@ void DemoFileSelected(UI::Application &app, const char *path) {
     uint32_t fileSize = 0;
     int sizeResult = openResult;
     int bytesRead = -1;
-    char preview[PREVIEW_BUFFER_SIZE];
+    char rawPreview[PREVIEW_BUFFER_SIZE];
+    char preview[256];
+    rawPreview[0] = 0;
     preview[0] = 0;
 
     if (openResult >= 0) {
@@ -514,24 +555,12 @@ void DemoFileSelected(UI::Application &app, const char *path) {
             int bytesToRead = requested;
             if (fileSize < static_cast<uint32_t>(requested))
                 bytesToRead = static_cast<int>(fileSize);
-            bytesRead = file.Read(preview, bytesToRead);
+            bytesRead = file.Read(rawPreview, bytesToRead);
             if (bytesRead >= 0 && bytesRead <= bytesToRead) {
-                preview[bytesRead] = 0;
-                for (int index = 0; index < bytesRead; ++index) {
-                    const unsigned char character =
-                        static_cast<unsigned char>(preview[index]);
-                    if (character < 32 || character > 126) {
-                        preview[index] = ' ';
-                    } else if (g_demoSettings.letterCase == 1 &&
-                               character >= 'a' && character <= 'z') {
-                        preview[index] =
-                            static_cast<char>(character - ('a' - 'A'));
-                    } else if (g_demoSettings.letterCase == 2 &&
-                               character >= 'A' && character <= 'Z') {
-                        preview[index] =
-                            static_cast<char>(character + ('a' - 'A'));
-                    }
-                }
+                rawPreview[bytesRead] = 0;
+                BuildPreview(rawPreview, bytesRead,
+                             g_demoSettings.previewFormat,
+                             preview, sizeof(preview));
             }
         }
         file.Close();
