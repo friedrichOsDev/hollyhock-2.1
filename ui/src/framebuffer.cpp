@@ -19,76 +19,6 @@ int SaturatingAddPositive(int value, int amount) {
     return value + amount;
 }
 
-int ClipCode(int x, int y, int width, int height) {
-    int code = 0;
-    if (x < 0)
-        code |= 1;
-    else if (x >= width)
-        code |= 2;
-
-    if (y < 0)
-        code |= 4;
-    else if (y >= height)
-        code |= 8;
-    return code;
-}
-
-bool ClipLine(int *x0, int *y0, int *x1, int *y1,
-              int width, int height) {
-    int code0 = ClipCode(*x0, *y0, width, height);
-    int code1 = ClipCode(*x1, *y1, width, height);
-    int iterations = 0;
-
-    while (true) {
-        // Cohen-Sutherland clipping should converge in a few passes.
-        // This guard prevents malformed geometry from looping indefinitely.
-        if (++iterations > 8)
-            return false;
-        if ((code0 | code1) == 0)
-            return true;
-        if ((code0 & code1) != 0)
-            return false;
-
-        const int outside = code0 ? code0 : code1;
-        const int dx = *x1 - *x0;
-        const int dy = *y1 - *y0;
-        int x = 0;
-        int y = 0;
-
-        if (outside & 4) {
-            if (dy == 0)
-                return false;
-            y = 0;
-            x = *x0 + (dx * (0 - *y0)) / dy;
-        } else if (outside & 8) {
-            if (dy == 0)
-                return false;
-            y = height - 1;
-            x = *x0 + (dx * (y - *y0)) / dy;
-        } else if (outside & 2) {
-            if (dx == 0)
-                return false;
-            x = width - 1;
-            y = *y0 + (dy * (x - *x0)) / dx;
-        } else {
-            if (dx == 0)
-                return false;
-            x = 0;
-            y = *y0 + (dy * (0 - *x0)) / dx;
-        }
-
-        if (outside == code0) {
-            *x0 = x;
-            *y0 = y;
-            code0 = ClipCode(*x0, *y0, width, height);
-        } else {
-            *x1 = x;
-            *y1 = y;
-            code1 = ClipCode(*x1, *y1, width, height);
-        }
-    }
-}
-
 void CopyGlyph(const uint8_t source[7], uint8_t destination[7]) {
     for (int row = 0; row < 7; ++row)
         destination[row] = source[row];
@@ -355,16 +285,14 @@ bool Framebuffer::DrawLine(int x1, int y1, int x2, int y2, Color color) {
     if (!m_active || !m_pixels)
         return false;
 
-    // Reject pathological coordinates before clipping. These bounds keep
-    // every clipping product inside signed 32-bit arithmetic on SH-4.
+    // Reject pathological coordinates before drawing. The limits keep the
+    // Bresenham loop bounded to at most 32767 steps and its arithmetic safe
+    // on SH-4, without relying on compiler-runtime division helpers.
     if (x1 < -kMaximumCoordinate || x1 > kMaximumCoordinate ||
         x2 < -kMaximumCoordinate || x2 > kMaximumCoordinate ||
         y1 < -kMaximumCoordinate || y1 > kMaximumCoordinate ||
         y2 < -kMaximumCoordinate || y2 > kMaximumCoordinate)
         return false;
-
-    if (!ClipLine(&x1, &y1, &x2, &y2, m_width, m_height))
-        return true;
 
     const int dx = x2 >= x1 ? x2 - x1 : x1 - x2;
     const int sx = x1 < x2 ? 1 : -1;
@@ -373,6 +301,8 @@ bool Framebuffer::DrawLine(int x1, int y1, int x2, int y2, Color color) {
     const int sy = y1 < y2 ? 1 : -1;
     int error = dx + dy;
 
+    // Draw only visible pixels. PutPixel performs bounds checking, so this
+    // naturally clips lines without division or touching memory out of range.
     while (true) {
         PutPixel(x1, y1, color);
         if (x1 == x2 && y1 == y2)
