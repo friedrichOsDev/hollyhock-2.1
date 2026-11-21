@@ -40,13 +40,23 @@ A `.hhk` file with the name you specified in the `Makefile` will be generated, w
 
 Open the launcher and select your application to launch it. Have fun!
 
-**Important:** The launcher's display name comes from metadata embedded in the compiled program, not from the current filename. Renaming `myapp.hhk` to `Python.hhk`, for example, does not change an embedded `APP_NAME`. To inspect or change launcher metadata after compilation, use the [compiled metadata guide](metadata.md) and `tools/hhkmeta.py`. To rename a file whose internal program path must match the physical filename, use the separate `tools/hhkrename.py` utility described there.
+**Important:** The launcher's display name comes from metadata embedded in
+the compiled program, not from the current filename. To inspect or change that
+metadata, use the [compiled metadata guide](metadata.md) and
+`tools/hhkmeta.py`.
 
-When the filename and embedded name should be changed together, use the
-`rename` command. For example,
-`python3 tools/hhkrename.py PythonExtra-hh2.bin PythonExtra.bin`
-renames the file and sets its embedded display name to `PythonExtra`.
+When renaming a compiled `.bin` or `.hhk`, use
+`tools/hhkrename.py` instead of only changing the filesystem name. The tool
+searches recognizable embedded ASCII strings for the old filename and updates
+matching references if found. If no reference is found, it simply renames the
+file. Example:
 
+```sh
+python3 tools/hhkrename.py PythonExtra-hh2.bin PythonExtra.bin
+```
+
+The utility does not change launcher display metadata. See
+[metadata and embedded references](metadata.md) for details.
 
 ## Newlib
 If you want to use C standard libraries such as math.h, string.h and others when developing for the fx-CP400, you must have a standard library implementation such as Newlib installed. Newlib also includes division and other arithmetic subroutines for our SuperH CPU, so that you do not have to always add them to your project manualy when you need them.
