@@ -10,6 +10,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import time
 from dataclasses import dataclass
 from fractions import Fraction
 from pathlib import Path
@@ -112,10 +113,10 @@ def frame_timestamp_ms(frame_number: int, fps: Fraction) -> int:
 
 def probe_duration_ms(ffprobe: str, source: Path) -> Optional[int]:
     commands = (
-        [ffprobe, "-v", "error", "-show_entries", "format=duration",
-         "-of", "default=noprint_wrappers=1:nokey=1", str(source)],
         [ffprobe, "-v", "error", "-select_streams", "v:0",
          "-show_entries", "stream=duration",
+         "-of", "default=noprint_wrappers=1:nokey=1", str(source)],
+        [ffprobe, "-v", "error", "-show_entries", "format=duration",
          "-of", "default=noprint_wrappers=1:nokey=1", str(source)],
     )
     for command in commands:
@@ -521,6 +522,7 @@ def convert(args: argparse.Namespace) -> None:
     keyframe_interval_ms = max(1, round(args.keyframe_interval * 1000))
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    conversion_started = time.monotonic()
     total_packet_stats = PacketStats.create()
     index_entries: list[tuple[int, int, int]] = []
     process: Optional[subprocess.Popen[bytes]] = None
@@ -715,6 +717,7 @@ def convert(args: argparse.Namespace) -> None:
         if input_frame_number % 50:
             print(file=sys.stderr)
         seconds = total_duration_ms / 1000.0
+        elapsed_wall = max(0.001, time.monotonic() - conversion_started)
         size = output_path.stat().st_size
         print(
             f"Created {output_path}\n"
@@ -727,7 +730,8 @@ def convert(args: argparse.Namespace) -> None:
             f"  Palette: {palette.size} colours\n"
             f"  Quality: {args.quality}/100\n"
             f"  File size: {size:,} bytes ({size / (1024 * 1024):.2f} MiB)\n"
-            f"  Conversion speed: {seconds:.2f} source seconds processed\n"
+            f"  Conversion time: {elapsed_wall:.2f} s\n"
+            f"  Conversion speed: {seconds / elapsed_wall:.2f}× realtime\n"
             f"  Packets: "
             + ", ".join(
                 f"{OP_NAMES[i]}={total_packet_stats.counts[i]} "
