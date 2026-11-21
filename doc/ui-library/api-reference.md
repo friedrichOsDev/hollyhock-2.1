@@ -80,7 +80,7 @@ public:
 };
 ~~~
 
-Open() creates the MCS folder when needed and returns zero only on success. Folder names are validated as 1-8 ASCII letters/digits because the SDK truncates longer names to eight characters. Variable names accepted by this wrapper must contain ASCII letters or digits. Load() copies the stored variable into caller-owned memory and reports its type and size. Save() creates or replaces a variable through MCS_SetVariable(). The caller is responsible for providing a sufficiently large buffer and interpreting the variable type. MCS functions can return positive error constants such as MCS_NO_FOLDER and MCS_NO_VARIABLE; wrapper argument and buffer errors use the SDK's negative error codes. Always test for result == 0, not result < 0.
+Open() creates the MCS folder when needed and returns zero only on success. Folder names are validated as 1-8 ASCII letters/digits because the SDK truncates longer names to eight characters. Variable names accepted by this wrapper must contain ASCII letters or digits. Load() copies the stored variable into caller-owned memory and reports its type and stored size. Save() copies the payload into a 4-byte-aligned buffer and rounds the stored size up to a multiple of four bytes before calling MCS_SetVariable(); padding bytes are zero. Therefore, actualSize may be larger than the original payload size. The caller is responsible for providing a sufficiently large buffer and interpreting the variable type. MCS functions can return positive error constants such as MCS_NO_FOLDER and MCS_NO_VARIABLE; wrapper argument and buffer errors use the SDK's negative error codes. Always test for result == 0, not result < 0.
 
 Example:
 
