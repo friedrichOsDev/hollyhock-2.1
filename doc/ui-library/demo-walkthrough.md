@@ -29,7 +29,7 @@ The SDK's find API uses a negative result for both end-of-search and errors. The
 
 ## 2. Persistent settings
 
-The demo sets config.settingsFolder to UIDEMO. The library creates this MCS folder on first run and loads saved settings before showing the menu. Changing a setting saves the new values immediately; leaving the application causes another save.
+The demo sets config.settingsFolder to UIDEMO. On the first launch, the library immediately creates the SETTINGS variable with default values. Later setting changes are saved automatically and persisted values are loaded before the next menu appears.
 
 Try changing Preview bytes or Text case, exit the application, and start it again. The selected values should be restored. This behavior uses Calc Vars, not files on fls0. The folder name is unique to this demo and within the SDK's eight-character limit.
 
