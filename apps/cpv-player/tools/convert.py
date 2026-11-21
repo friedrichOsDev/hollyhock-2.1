@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Encode FFmpeg-readable videos into the CPV v1.0 global-palette format."""
+"""Encode FFmpeg-readable videos into the CPV v1.1 global-palette format."""
 
 from __future__ import annotations
 
@@ -29,9 +29,9 @@ except ImportError:
 
 MAGIC = b"CPV\0"
 VERSION_MAJOR = 1
-VERSION_MINOR = 0
+VERSION_MINOR = 1
 
-# CPV v1: 64-byte file header, 20-byte frame header, 12-byte index entry.
+# CPV v1.1: 64-byte file header, 20-byte frame header, 12-byte index entry.
 HEADER = struct.Struct("<4sBBHIHHHHIHHIIII20s")
 FRAME_HEADER = struct.Struct("<4sBBHIII")
 INDEX_HEADER = struct.Struct("<4sI")
@@ -947,7 +947,7 @@ def convert(args: argparse.Namespace) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Convert an FFmpeg-readable video into the CPV v1.0 format."
+        description="Convert an FFmpeg-readable video into the CPV v1.1 format."
     )
     parser.add_argument("input", help="input video file supported by FFmpeg")
     parser.add_argument("--output", required=True, help="output .cpv file")
