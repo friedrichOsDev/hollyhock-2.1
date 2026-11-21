@@ -1,112 +1,124 @@
 #!/usr/bin/env python3
-"""Rename a Hollyhock program file and update its embedded calculator path.
+"""Rename compiled Hollyhock files and update recognizable embedded references.
 
-This tool changes the hard-coded path (for example, \\fls0\\OldName.bin)
-inside the program image. It deliberately does not edit launcher metadata.
+Only printable, NUL-terminated ASCII strings are rewritten. A filename that
+appears as a standalone string or as the basename of a path is updated when
+the replacement fits the string's existing zero-padded storage. If no such
+reference is found, the utility performs a normal file rename.
 """
-
 from __future__ import annotations
 
 import argparse
 import os
-import re
 import stat
 import sys
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Tuple
 
 
 class RenameError(Exception):
-    """Raised when a safe embedded-path update is not possible."""
+    """Raised when the requested rename cannot be completed safely."""
 
 
-# This is the path form found in compiled Hollyhock applications. Keep this
-# intentionally narrow: never guess at arbitrary strings that merely resemble
-# a filename.
-EMBEDDED_PATH_RE = re.compile(
-    rb"\\(?:fls0|drv0)\\[^\x00\r\n]{1,240}\.(?:bin|hhk)\x00",
-    re.IGNORECASE,
-)
-
-
-def find_path_references(
-    data: bytes, source_name: str
-) -> List[Tuple[int, bytes, int]]:
-    """Return (offset, old_path_without_NUL, writable_zero_slot_size)."""
+def _valid_name(name: str) -> bytes:
     try:
-        source_ascii = source_name.encode("ascii")
+        raw = name.encode("ascii")
     except UnicodeEncodeError as exc:
-        raise RenameError("The source filename must contain ASCII characters only.") from exc
+        raise RenameError("Filenames must use ASCII characters only.") from exc
+    if not raw or any(b < 0x20 or b > 0x7E for b in raw) or b"/" in raw or b"\\" in raw:
+        raise RenameError("Pass a printable ASCII basename, not a path.")
+    return raw
 
-    references: List[Tuple[int, bytes, int]] = []
-    for match in EMBEDDED_PATH_RE.finditer(data):
-        old_path = match.group(0)[:-1]
-        embedded_name = old_path.rsplit(b"\\", 1)[-1]
-        if embedded_name != source_ascii:
+
+def _c_string_ranges(data: bytes) -> List[Tuple[int, int, int]]:
+    """Return (start, end-exclusive, slot-end) for printable ASCII C strings."""
+    ranges = []
+    i = 0
+    while i < len(data):
+        if data[i] < 0x20 or data[i] > 0x7E:
+            i += 1
             continue
+        start = i
+        while i < len(data) and 0x20 <= data[i] <= 0x7E:
+            i += 1
+        end = i
+        if i < len(data) and data[i] == 0:
+            slot_end = i + 1
+            while slot_end < len(data) and data[slot_end] == 0:
+                slot_end += 1
+            ranges.append((start, end, slot_end))
+    return ranges
 
-        start = match.start()
-        slot_end = match.end()
-        # Only use bytes that are already zero immediately after the C-string.
-        # This safely handles the reserved static character buffer seen in
-        # PythonExtra (0x106..0x12F), without moving or overwriting program data.
-        while slot_end < len(data) and data[slot_end] == 0:
-            slot_end += 1
-        references.append((start, old_path, slot_end - start))
 
-    return references
+def find_references(data: bytes, old_name: bytes):
+    """Find basename references in printable NUL-terminated strings."""
+    findings = []
+    for start, end, slot_end in _c_string_ranges(data):
+        string = data[start:end]
+        pos = 0
+        while True:
+            index = string.find(old_name, pos)
+            if index < 0:
+                break
+            after = index + len(old_name)
+            before_ok = index == 0 or string[index - 1] in (ord("/"), ord("\\"))
+            after_ok = after == len(string) or string[after] in (ord("/"), ord("\\"))
+            if before_ok and after_ok:
+                findings.append({
+                    "offset": start + index,
+                    "string_start": start,
+                    "string_end": end,
+                    "slot_end": slot_end,
+                    "old_string": string,
+                    "name_offset": index,
+                    "kind": "path" if b"/" in string or b"\\" in string else "filename",
+                })
+            pos = after
+    return findings
 
 
-def patch_embedded_paths(
-    data: bytes,
-    references: List[Tuple[int, bytes, int]],
-    destination_name: str,
-) -> Tuple[bytes, List[Tuple[int, bytes, bytes, int]]]:
-    try:
-        new_name = destination_name.encode("ascii")
-    except UnicodeEncodeError as exc:
-        raise RenameError("The destination filename must contain ASCII characters only.") from exc
-    if not new_name or any(byte < 0x20 or byte > 0x7E for byte in new_name):
-        raise RenameError("The destination filename must be printable ASCII.")
-    if b"\\" in new_name or b"/" in new_name:
-        raise RenameError("Pass a filename, not a directory path, as the destination basename.")
+def patch_references(data: bytes, findings, new_name: bytes):
+    out = bytearray(data)
+    changes = []
+    grouped = {}
+    for finding in findings:
+        key = (finding["string_start"], finding["string_end"], finding["slot_end"])
+        grouped.setdefault(key, []).append(finding)
 
-    output = bytearray(data)
-    changes: List[Tuple[int, bytes, bytes, int]] = []
-    for start, old_path, capacity in references:
-        volume_prefix = old_path.rsplit(b"\\", 1)[0] + b"\\"
-        new_path = volume_prefix + new_name
-        encoded = new_path + b"\0"
-        if len(encoded) > capacity:
-            maximum = capacity - len(volume_prefix) - 1
+    for (start, end, slot_end), group in grouped.items():
+        original = bytes(out[start:end])
+        updated = original
+        old_name_len = len(group[0]["old_string"])  # replaced below by basename length
+        # The exact matched token length is retained in the finding to avoid
+        # accidentally using the whole surrounding path length.
+        old_token_len = group[0]["token_length"]
+        for pos in sorted((f["name_offset"] for f in group), reverse=True):
+            updated = updated[:pos] + new_name + updated[pos + old_token_len:]
+        capacity = slot_end - start
+        if len(updated) + 1 > capacity:
             raise RenameError(
-                f"Embedded path at offset 0x{start:X} has room for at most "
-                f"{maximum} filename bytes; '{destination_name}' needs "
-                f"{len(new_name)}. Choose a shorter filename or rebuild with "
-                "a larger path buffer. The original file was not changed."
+                f"String at 0x{start:X} needs {len(updated)+1} bytes including NUL, "
+                f"but its existing zero-padded slot has only {capacity}. "
+                "Choose a shorter name or rebuild the program. No files were changed."
             )
-        output[start:start + capacity] = encoded + bytes(capacity - len(encoded))
-        changes.append((start, old_path, new_path, capacity))
+        out[start:slot_end] = updated + bytes(capacity - len(updated))
+        changes.append((start, original, updated, capacity))
+    return bytes(out), changes
 
-    return bytes(output), changes
 
-
-def write_destination(destination: Path, data: bytes, source_mode: int) -> None:
+def write_new(destination: Path, data: bytes, mode: int):
     if destination.exists():
         raise RenameError(f"Destination already exists: {destination}")
     if not destination.parent.is_dir():
         raise RenameError(f"Destination directory does not exist: {destination.parent}")
-
     created = False
     try:
-        # Exclusive creation avoids overwriting files and works on FAT/exFAT
-        # calculator storage, where hard links are not generally supported.
         with destination.open("xb") as stream:
             created = True
             stream.write(data)
             stream.flush()
             os.fsync(stream.fileno())
-        os.chmod(destination, stat.S_IMODE(source_mode))
+        os.chmod(destination, stat.S_IMODE(mode))
     except Exception:
         if created:
             try:
@@ -116,91 +128,67 @@ def write_destination(destination: Path, data: bytes, source_mode: int) -> None:
         raise
 
 
-def build_parser() -> argparse.ArgumentParser:
+def build_parser():
     parser = argparse.ArgumentParser(
-        description=(
-            "Rename a compiled .bin/.hhk file and update its embedded "
-            r"\fls0\ or \drv0\ filename reference. Does not edit launcher metadata."
-        )
+        description="Rename .bin/.hhk files and update recognizable embedded filename/path strings when present."
     )
     parser.add_argument("source", help="existing compiled .bin or .hhk file")
-    parser.add_argument(
-        "destination",
-        help="new filename; a relative filename is placed beside the source",
-    )
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="show embedded path changes without writing or renaming",
-    )
+    parser.add_argument("destination", help="new basename; relative paths are placed beside source")
+    parser.add_argument("--dry-run", action="store_true", help="analyze and report without writing")
     return parser
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv=None):
     args = build_parser().parse_args(argv)
     source = Path(args.source).expanduser().resolve()
-    destination_arg = Path(args.destination).expanduser()
-    destination = (
-        (source.parent / destination_arg).resolve()
-        if not destination_arg.is_absolute()
-        else destination_arg.resolve()
-    )
-
+    dest_arg = Path(args.destination).expanduser()
+    destination = (source.parent / dest_arg).resolve() if not dest_arg.is_absolute() else dest_arg.resolve()
     try:
+        old_name = _valid_name(source.name)
+        new_name = _valid_name(destination.name)
         if not source.is_file():
-            raise RenameError(f"Source file does not exist or is not a regular file: {source}")
+            raise RenameError(f"Source is not a regular file: {source}")
         if source == destination:
             raise RenameError("Source and destination are identical.")
         if source.suffix.lower() not in (".bin", ".hhk"):
-            raise RenameError("Only compiled .bin and .hhk files are supported.")
+            raise RenameError("Only .bin and .hhk files are supported.")
         if destination.suffix.lower() != source.suffix.lower():
-            raise RenameError("Keep the same file extension (.bin or .hhk).")
+            raise RenameError("Keep the original extension (.bin or .hhk).")
         if destination.exists():
             raise RenameError(f"Destination already exists: {destination}")
 
         data = source.read_bytes()
-        references = find_path_references(data, source.name)
-        if not references:
-            candidates = [
-                match.group(0)[:-1].decode("ascii", "replace")
-                for match in EMBEDDED_PATH_RE.finditer(data)
-            ]
-            found = ""
-            if candidates:
-                found = " Embedded paths found: " + ", ".join(repr(x) for x in candidates[:8])
-            raise RenameError(
-                f"No embedded calculator path ending in '{source.name}' was found."
-                " Refusing to guess which other path should be changed." + found
-            )
-
-        patched, changes = patch_embedded_paths(data, references, destination.name)
-        # Verify the intended path values before any disk operation.
-        for start, old_path, new_path, capacity in changes:
-            if patched.count(new_path + b"\0") < 1:
-                raise RenameError(f"Internal verification failed for path at 0x{start:X}.")
+        findings = find_references(data, old_name)
+        patched, changes = patch_references(data, findings, new_name) if findings else (data, [])
+        for start, old_string, new_string, capacity in changes:
+            kind = "path" if b"/" in old_string or b"\\" in old_string else "filename"
             print(
-                f"0x{start:08X}: {old_path.decode('ascii')} -> "
-                f"{new_path.decode('ascii')} (slot: {capacity} bytes)"
+                f"0x{start:08X}: {kind}: {old_string.decode('ascii')} -> "
+                f"{new_string.decode('ascii')} (slot {capacity} bytes)"
             )
-
+        if not findings:
+            print(f"No recognizable references to {source.name} found; file contents will remain unchanged.")
+        else:
+            print(f"Updated {len(findings)} reference(s) in {len(changes)} string(s).")
         if args.dry_run:
-            print("Dry run only; no files changed.")
+            print(f"Dry run: would rename {source} -> {destination}; no files changed.")
             return 0
 
-        write_destination(destination, patched, source.stat().st_mode)
+        write_new(destination, patched, source.stat().st_mode)
         try:
             source.unlink()
         except OSError as exc:
             print(
-                f"warning: wrote {destination}, but could not remove original "
-                f"{source}: {exc}\nBoth files have been kept.",
+                f"warning: wrote {destination}, but could not remove original {source}: "
+                f"{exc}. Both files remain.",
                 file=sys.stderr,
             )
             return 1
-
         print(f"Renamed: {source} -> {destination}")
-        print(f"Updated {len(changes)} embedded path reference(s).")
-        print("Launcher metadata (name, description, author, version) was not changed.")
+        if findings:
+            print(f"Patched {len(findings)} embedded filename/path reference(s).")
+        else:
+            print("Renamed only; no embedded references were modified.")
         return 0
     except (OSError, RenameError) as exc:
         print(f"error: {exc}", file=sys.stderr)
