@@ -5,7 +5,7 @@
 struct DemoSettings {
     bool showPreview;
     int previewBytes;
-    int letterCase;
+    int previewFormat;
     bool showFileSize;
 };
 
