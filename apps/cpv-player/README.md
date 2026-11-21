@@ -106,4 +106,4 @@ See [cpv_v1.md](cpv_v1.md) for the complete byte-level container, packet, encode
 
 CPV v1 uses a 64-byte little-endian file header, one global RGB565 palette, 20-byte frame headers, four linear packet types (INDEX_LITERAL, INDEX_REPEAT, SKIP, RAW565), I/P-frames, and a 12-byte keyframe index entry format.
 
-The current v1 format is not backward-compatible with the legacy `CP` format used by the earlier standalone player.
+The current v1 format is not backward-compatible with the legacy `CP` format used by the earlier standalone player or with the earlier experimental tile-based CPV draft. Existing `.cpv` files from those formats MUST be converted again with this version of `convert.py` before they can be opened by this player.
