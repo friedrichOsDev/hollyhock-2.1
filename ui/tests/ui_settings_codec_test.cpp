@@ -152,6 +152,21 @@ int main() {
           UI::Detail::ValidSettingDefinitions(&identified, 1),
           "explicit stable setting ID is supported");
 
+    bool explicitSaved = true;
+    UI::Setting explicitOriginal =
+        UI::Setting::Boolean("stable.option", "Original label",
+                             &explicitSaved);
+    Check(UI::Detail::SerializeSettings(&explicitOriginal, 1,
+                                        buffer, &size),
+          "serialize a setting with an explicit ID");
+    bool explicitLoaded = false;
+    UI::Setting renamed =
+        UI::Setting::Boolean("stable.option", "Renamed label",
+                             &explicitLoaded);
+    Check(UI::Detail::ParseSettings(buffer, &renamed, 1) &&
+          explicitLoaded,
+          "explicit IDs preserve values after display-name changes");
+
     printf("\n%d checks, %d failure(s)\n", checks, failures);
     return failures == 0 ? 0 : 1;
 }
