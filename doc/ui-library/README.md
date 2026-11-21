@@ -34,7 +34,7 @@ The automatic serializer supports at most 32 settings and a payload smaller than
 
 ## Limitations
 
-The file-system wrapper supports fls0 only. File and directory names are converted to printable ASCII; characters outside ASCII 32-126 are shown as question marks. Non-ASCII paths are not supported.
+The file-system wrapper supports fls0 only. File and directory names are converted to printable ASCII; characters outside ASCII 32-126 are shown as question marks. Such entries cannot be selected reliably because their original names cannot be reconstructed from the displayed text. Non-ASCII paths are rejected.
 
 The UI library does not provide a general-purpose widget system or custom dialog builder. The built-in selector collects up to 64 entries per directory and displays five per page.
 

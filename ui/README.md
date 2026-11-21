@@ -23,6 +23,10 @@ Link both objects into your application and add sdk/include and ui/include to th
 ./app_template/build.sh
 ~~~
 
+## Host API tests
+
+Run `make -C ui/tests host-test` from the repository root. The host tests cover path normalization, file and directory wrappers, read-only open flags, filters, setting factories, and configuration defaults. They mock the SDK file-system calls and do not replace testing on the calculator.
+
 ## Demo application
 
 The demo is read-only for file-system access. It demonstrates root-directory enumeration, the built-in filtered file selector, file metadata, read/seek operations, and configurable text previews. Its built-in settings are stored in the UIDEMO MCS folder.

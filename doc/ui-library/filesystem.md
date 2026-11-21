@@ -149,7 +149,7 @@ The SDK's find API uses a search handle. Always close it. The wrapper closes it 
 
 Each UI::DirectoryEntry contains:
 
-- name[128] — the entry name converted to printable ASCII.
+- name[128] — the entry name converted to printable ASCII. Characters outside ASCII 32-126 are replaced with `?`. Since the original character is lost, such an entry cannot be opened reliably through the selector; this wrapper does not provide Unicode path conversion.
 - isDirectory — true when the entry is a directory.
 - size — the entry size in bytes; directories normally report zero.
 
@@ -166,7 +166,7 @@ if (directory.Open("fls0/") == 0) {
 }
 ~~~
 
-The current API uses a negative return value for both end-of-search and errors. It does not provide a separate status that distinguishes those cases.
+The current API uses a negative return value for both end-of-search and errors. It does not provide a separate status that distinguishes those cases. The directory handle remains open after the first negative result, so call `Close()` when enumeration is complete or let the object leave scope.
 
 ## File filters
 

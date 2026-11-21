@@ -96,7 +96,7 @@ For example, the demo uses UIDEMO and ui_test uses UITEST. Give every applicatio
 
 When settingsFolder is set, UI::Application loads saved settings before showing the first menu. It saves settings after a settings entry is selected and once again when Run() exits normally. When the SETTINGS variable does not exist yet, the library now immediately writes the application's default settings to MCS during startup. This creates a visible SETTINGS variable on the first launch rather than waiting for the first settings interaction or application exit.
 
-The automatic settings serializer supports Boolean, Integer, and Enumeration settings plus Action entries (actions have no stored value). It currently supports up to 32 entries and a serialized payload smaller than 512 bytes. The saved data is versioned; incompatible or invalid data is rejected rather than copied into application variables.
+The automatic settings serializer supports Boolean, Integer, and Enumeration settings plus Action entries (actions have no stored value). It currently supports up to 32 entries and a serialized payload smaller than 512 bytes. Integer definitions must have a valid minimum/maximum range and a positive step; enumeration definitions need a non-empty option array. Initial and changed values must remain within their configured bounds before they can be persisted. The saved data is versioned; incompatible or invalid data is rejected rather than copied into application variables.
 
 Check the result with:
 

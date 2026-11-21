@@ -9,17 +9,18 @@ class File {
 public:
     File();
     ~File();
+
     File(const File &) = delete;
     File &operator=(const File &) = delete;
 
-    // The UI wrapper is intentionally read-only. Paths are volume-relative
-    // and may use either slash style.
-    // Open returns a native descriptor or a negative SDK error code.
+    // Paths are volume-relative and may use either slash style.
+    // The wrapper always opens files with OPEN_READ.
     int Open(const char *path);
     int Close();
     int Read(void *buffer, int count);
     int Seek(int offset, int whence = SEEK_SET);
     int GetSize(uint32_t *size) const;
+
     bool IsOpen() const;
 
 private:
@@ -28,9 +29,11 @@ private:
 
 class FileSystem {
 public:
-    // Converts paths such as "fls0/folder/file.txt", "/fls0/file.txt",
-    // or "\\fls0\\file.txt" to native "\\fls0\\file.txt".
-    // Rejects other volumes and parent traversal.
+    // Converts "fls0/folder/file.txt", "/fls0/file.txt", and
+    // "\\fls0\\file.txt" to the SDK's native path format.
+    // Only printable ASCII path components are accepted. FAT-reserved
+    // characters and parent traversal are rejected.
+    // The normalized path is limited to 255 characters plus the null byte.
     static int NormalizePath(const char *input, char *output, int capacity);
     static int Stat(const char *path, struct stat *info);
     static bool Exists(const char *path);
@@ -46,12 +49,16 @@ class Directory {
 public:
     Directory();
     ~Directory();
+
     Directory(const Directory &) = delete;
     Directory &operator=(const Directory &) = delete;
 
     int Open(const char *path);
-    // Next returns 0 for an entry and a negative SDK code when finished/error.
+
+    // Returns zero for an entry and a negative SDK error at end-of-search
+    // or on failure. Call Close() when enumeration is complete.
     int Next(DirectoryEntry *entry);
+
     int Close();
     bool IsOpen() const;
 

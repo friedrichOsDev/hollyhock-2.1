@@ -1,13 +1,28 @@
 SDK_DIR ?= ../sdk
+
 CXX := sh4-elf-g++
-CXXFLAGS := -ffreestanding -fno-exceptions -fno-rtti -fshort-wchar -Wall -Wextra -O2 -m4a-nofpu -Iinclude -I$(SDK_DIR)/include
+LD := sh4-elf-ld
+
+CXXFLAGS := -ffreestanding -fno-exceptions -fno-rtti -fshort-wchar \
+            -Wall -Wextra -O2 -m4a-nofpu \
+            -Iinclude -I$(SDK_DIR)/include
+DEPFLAGS := -MMD -MP
+
 SOURCES := $(wildcard src/*.cpp)
 OBJECTS := $(SOURCES:.cpp=.o)
+DEPFILES := $(OBJECTS:.o=.d)
+
 all: ui.o
+
 ui.o: $(OBJECTS)
-	sh4-elf-ld -nostdlib -r -o $@ $(OBJECTS)
+	$(LD) -nostdlib -r -o $@ $(OBJECTS)
+
 %.o: %.cpp
-	$(CXX) -c $< -o $@ $(CXXFLAGS)
+	$(CXX) -c $< -o $@ $(CXXFLAGS) $(DEPFLAGS)
+
 clean:
-	rm -f $(OBJECTS) ui.o
+	rm -f $(OBJECTS) $(DEPFILES) ui.o
+
+-include $(DEPFILES)
+
 .PHONY: all clean
