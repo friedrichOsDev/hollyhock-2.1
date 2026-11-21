@@ -87,7 +87,7 @@ The five settings demonstrate Boolean, Integer, Enumeration, and Action entries:
 
 - File preview
 - Preview bytes
-- Letter case
+- Preview format (text or hexadecimal)
 - Show file size
 - Reset demo settings
 
