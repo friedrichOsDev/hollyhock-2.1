@@ -36,8 +36,8 @@ extern "C" void main() {
     config.onFileSelected = CPVFileSelected;
 
     const UI::FileFilter filters[] = {
-        UI::FileFilter(".cpv", "Video files (format version 1.0)"),
-        UI::FileFilter(".cpv2", "Video files (format version 2.0)")
+        UI::FileFilter(".cpv", "Classpad Video files"),
+        // UI::FileFilter(".cpv2", "Video files (format version 2.0)")
     };
     config.filters = filters;
     config.filterCount = sizeof(filters) / sizeof(filters[0]);
