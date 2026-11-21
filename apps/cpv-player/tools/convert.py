@@ -152,8 +152,36 @@ def probe_duration_ms(ffprobe: str, source: Path) -> Optional[int]:
     return None
 
 
-def make_filter(width: int, height: int, fps: Fraction, fit: str, background: str) -> str:
-    filters = [f"fps={fps.numerator}/{fps.denominator}"]
+def hqdn3d_filter(preprocess_quality: int) -> Optional[str]:
+    """Map pre-processing quality to a mild-to-strong spatial/temporal denoiser."""
+    if preprocess_quality == 0:
+        return None
+
+    strength = preprocess_quality / 100.0
+    luma_spatial = 0.5 + 3.5 * strength
+    chroma_spatial = 0.75 + 5.25 * strength
+    luma_temporal = 1.0 + 5.0 * strength
+    chroma_temporal = 1.5 + 7.5 * strength
+    values = (
+        luma_spatial,
+        chroma_spatial,
+        luma_temporal,
+        chroma_temporal,
+    )
+    return "hqdn3d=" + ":".join(f"{value:.2f}" for value in values)
+
+
+def make_filter(
+    width: int,
+    height: int,
+    fps: Fraction,
+    fit: str,
+    background: str,
+    preprocess_quality: int = 0,
+) -> str:
+    # Scale before denoising to keep the filter inexpensive. Denoising happens
+    # before frame-rate reduction so temporal filtering sees the source cadence.
+    filters = []
     if fit == "stretch":
         filters.append(f"scale={width}:{height}:flags=lanczos")
     else:
@@ -161,19 +189,25 @@ def make_filter(width: int, height: int, fps: Fraction, fit: str, background: st
             f"scale={width}:{height}:force_original_aspect_ratio=decrease:flags=lanczos"
         )
         filters.append(f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color={background}")
+
+    denoise_filter = hqdn3d_filter(preprocess_quality)
+    if denoise_filter is not None:
+        filters.append(denoise_filter)
+
+    filters.append(f"fps={fps.numerator}/{fps.denominator}")
     filters.append("setsar=1")
     return ",".join(filters)
 
 
-def palette_limit_for_quality(quality: int) -> int:
-    """Map quality to FFmpeg's single global palette budget."""
-    if quality < 15:
+def palette_limit_for_palette_quality(palette_quality: int) -> int:
+    """Map palette quality to FFmpeg's single global palette budget."""
+    if palette_quality < 15:
         return 16
-    if quality < 35:
+    if palette_quality < 35:
         return 32
-    if quality < 55:
+    if palette_quality < 55:
         return 64
-    if quality < 75:
+    if palette_quality < 75:
         return 128
     return 256
 
@@ -195,14 +229,17 @@ def build_global_palette(
     height: int,
     fit: str,
     background: str,
-    quality: int,
+    palette_quality: int,
+    preprocess_quality: int,
     temp_dir: Path,
 ):
-    """Use FFmpeg's native palettegen filter, then convert the palette to RGB565."""
+    """Build a global palette from frames passed through the same pre-processing."""
     require_numpy()
-    max_colours = palette_limit_for_quality(quality)
+    max_colours = palette_limit_for_palette_quality(palette_quality)
     palette_path = temp_dir / "palette.png"
-    sample_filter = make_filter(width, height, Fraction(1, 1), fit, background)
+    sample_filter = make_filter(
+        width, height, Fraction(1, 1), fit, background, preprocess_quality
+    )
     video_filter = (
         sample_filter
         + f",palettegen=max_colors={max_colours}:stats_mode=full:reserve_transparent=0"
@@ -274,11 +311,11 @@ def rgb24_to_rgb565(raw: bytes):
     return ((red << 11) | (green << 5) | blue).astype(np.uint16)
 
 
-def map_frame(source565, palette, lookup, quality: int):
+def map_frame(source565, palette, lookup, palette_quality: int):
     """Return palette indices, exact reconstructed RGB565 pixels, and RAW mask."""
     indices = lookup[source565]
     palette_pixels = palette[indices]
-    if quality == 100:
+    if palette_quality == 100:
         # Preserve every source RGB565 value. Palette hits remain palette-coded;
         # all other pixels are stored by RAW565 packets.
         raw_mask = source565 != palette_pixels
@@ -678,8 +715,10 @@ def convert(args: argparse.Namespace) -> None:
         raise ConversionError("input and output paths must be different")
     if not (1 <= args.width <= MAX_WIDTH and 1 <= args.height <= MAX_HEIGHT):
         raise ConversionError(f"width and height must be within 1..{MAX_WIDTH} and 1..{MAX_HEIGHT}")
-    if not (0 <= args.quality <= 100):
-        raise ConversionError("quality must be between 0 and 100")
+    if not (0 <= args.palette_quality <= 100):
+        raise ConversionError("palette quality must be between 0 and 100")
+    if not (0 <= args.preprocess_quality <= 100):
+        raise ConversionError("pre-processing quality must be between 0 and 100")
     if not (0 < args.keyframe_interval <= 10):
         raise ConversionError("keyframe interval must be greater than 0 and no greater than 10 seconds")
 
@@ -694,7 +733,10 @@ def convert(args: argparse.Namespace) -> None:
         )
 
     fps: Fraction = args.fps
-    video_filter = make_filter(args.width, args.height, fps, args.fit, args.background)
+    video_filter = make_filter(
+        args.width, args.height, fps, args.fit, args.background,
+        args.preprocess_quality,
+    )
     frame_bytes = args.width * args.height * 3
     pixel_count = args.width * args.height
     keyframe_interval_ms = max(1, round(args.keyframe_interval * 1000))
@@ -713,12 +755,14 @@ def convert(args: argparse.Namespace) -> None:
         with tempfile.TemporaryDirectory(prefix="cpv_palette_") as palette_dir:
             palette, palette_limit = build_global_palette(
                 ffmpeg, source, args.width, args.height, args.fit,
-                args.background, args.quality, Path(palette_dir),
+                args.background, args.palette_quality, args.preprocess_quality,
+                Path(palette_dir),
             )
             lookup = build_rgb565_lookup(palette)
             print(
                 f"Global palette: {palette.size}/{palette_limit} colours "
-                f"(quality {args.quality}/100)"
+                f"(palette quality {args.palette_quality}/100; "
+                f"pre-process quality {args.preprocess_quality}/100)"
             )
 
             ffmpeg_command = [
@@ -770,7 +814,7 @@ def convert(args: argparse.Namespace) -> None:
 
                     source565 = rgb24_to_rgb565(raw)
                     indices, reconstructed, raw_mask = map_frame(
-                        source565, palette, lookup, args.quality
+                        source565, palette, lookup, args.palette_quality
                     )
 
                     identical = (
@@ -919,7 +963,8 @@ def convert(args: argparse.Namespace) -> None:
             f"  Keyframes: {len(index_entries)}\n"
             f"  Duration: {seconds:.3f} s\n"
             f"  Palette: {palette.size} colours\n"
-            f"  Quality: {args.quality}/100\n"
+            f"  Palette quality: {args.palette_quality}/100\n"
+            f"  Pre-process quality: {args.preprocess_quality}/100\n"
             f"  Palette index width: {bits_per_index(int(palette.size))} bits\n"
             f"  LZ4-compressed frames: {total_compressed_frames}/{stored_frame_count}\n"
             f"  LZ4 bytes saved: {total_lz4_savings:,}\n"
@@ -958,8 +1003,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="output frame rate (greater than 0 and no greater than 30; normally 10)",
     )
     parser.add_argument(
-        "--quality", type=int, choices=range(0, 101), default=75,
-        help="global palette quality: 0 (16 colours) to 100 (RGB565-preserving RAW fallback; default: 75)",
+        "--palette-quality", type=int, choices=range(0, 101), default=75,
+        help="palette quality: 0 (16 colours) to 100 (RGB565-preserving RAW fallback; default: 75)",
+    )
+    parser.add_argument(
+        "--preprocess-quality", type=int, choices=range(0, 101), default=0,
+        help="spatial/temporal denoising strength: 0 disables it, 100 is strongest (default: 0)",
     )
     parser.add_argument(
         "--no-delta-mask", action="store_true",
