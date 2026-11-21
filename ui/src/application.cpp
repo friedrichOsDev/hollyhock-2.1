@@ -1183,12 +1183,12 @@ bool Application::RunFramebufferMainMenu() {
             if (i == selected) {
                 screen.FillRect(8, y, screen.Width() - 16,
                                 rowHeight - 3, Colors::Blue);
-                screen.DrawText(16, y + (rowHeight - 7) / 2,
+                screen.DrawText(16, y + DividePositive(rowHeight - 7, 2),
                                 labels[i], Colors::White);
             } else {
                 screen.DrawRect(8, y, screen.Width() - 16,
                                 rowHeight - 3, Colors::Gray);
-                screen.DrawText(16, y + (rowHeight - 7) / 2,
+                screen.DrawText(16, y + DividePositive(rowHeight - 7, 2),
                                 labels[i], Colors::Black);
             }
         }
@@ -1356,7 +1356,7 @@ bool Application::RunFramebufferFileSelector() {
             screen.DrawText(12, rowTop + 8, "No matching entries",
                             Colors::Gray);
 
-        int buttonWidth = screen.Width() / 4;
+        int buttonWidth = DividePositive(screen.Width(), 4);
         if (buttonWidth < 1)
             buttonWidth = 1;
         const char *footer[4] = {"<", ">", "Up", "Back"};
@@ -1575,7 +1575,7 @@ bool Application::RunFramebufferSettings() {
         const Setting &current = m_config.settings[selected];
         if (current.description && current.description[0])
             screen.DrawText(8, descriptionY, current.description, Colors::Gray);
-        int buttonWidth = screen.Width() / 3;
+        int buttonWidth = DividePositive(screen.Width(), 3);
         if (buttonWidth < 1)
             buttonWidth = 1;
         const char *footer[3] = {"<", ">", "Back"};
