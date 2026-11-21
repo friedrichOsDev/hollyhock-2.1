@@ -313,6 +313,7 @@ def main() -> int:
     destination.add_argument("--in-place", action="store_true", help="edit input; create FILE.bak first")
     p_set.add_argument("--force", action="store_true", help="overwrite an existing output file")
 
+    args = parser.parse_args()
     source = Path(args.file).expanduser().resolve()
     try:
         data = source.read_bytes()
