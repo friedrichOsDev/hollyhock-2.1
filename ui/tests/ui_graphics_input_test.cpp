@@ -180,7 +180,11 @@ int main() {
 
     lcdWidth = 0;
     Check(!screen.Begin(), "Begin rejects invalid LCD dimensions");
+    lcdWidth = 2048;
+    lcdHeight = 1024;
+    Check(!screen.Begin(), "Begin rejects excessive framebuffer dimensions");
     lcdWidth = 8;
+    lcdHeight = 12;
     nullVram = true;
     Check(!screen.Begin(), "Begin rejects a null VRAM pointer");
     nullVram = false;

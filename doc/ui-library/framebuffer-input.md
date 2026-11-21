@@ -157,7 +157,7 @@ The existing file selector is unchanged. A fully custom file browser can combine
 ## Safety notes
 
 - Framebuffer is non-copyable and has no public raw VRAM pointer.
-- Begin() validates the VRAM pointer and dynamic LCD dimensions.
+- Begin() validates the VRAM pointer and dynamic LCD dimensions. Each dimension must be positive and no greater than 16384; the total image is capped at 1,048,576 pixels.
 - SetPixel() rejects out-of-range coordinates.
 - Rectangle drawing clips to the visible display.
 - Line endpoints are range-checked before clipping and rasterization.

@@ -5,6 +5,7 @@ namespace UI {
 namespace {
 
 const int kMaximumDimension = 16384;
+const uint32_t kMaximumPixels = 1048576U;
 const int kMaximumCoordinate = 16383;
 const int kIntMaximum = 2147483647;
 const int kIntMinimum = (-2147483647 - 1);
@@ -36,8 +37,13 @@ bool ClipLine(int *x0, int *y0, int *x1, int *y1,
               int width, int height) {
     int code0 = ClipCode(*x0, *y0, width, height);
     int code1 = ClipCode(*x1, *y1, width, height);
+    int iterations = 0;
 
     while (true) {
+        // Cohen-Sutherland clipping should converge in a few passes.
+        // This guard prevents malformed geometry from looping indefinitely.
+        if (++iterations > 8)
+            return false;
         if ((code0 | code1) == 0)
             return true;
         if ((code0 & code1) != 0)
@@ -216,8 +222,14 @@ bool Framebuffer::Begin() {
         return false;
     }
 
-    // The dimension limit keeps the row-major index within signed 32-bit
-    // range on the target SH-4 and avoids overflow during pointer indexing.
+    const uint32_t pixelCount =
+        static_cast<uint32_t>(width) * static_cast<uint32_t>(height);
+    if (pixelCount > kMaximumPixels) {
+        End();
+        return false;
+    }
+
+    // Dimension and pixel-count limits keep row-major indexing bounded.
     m_pixels = pixels;
     m_width = width;
     m_height = height;
