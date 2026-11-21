@@ -67,7 +67,7 @@ When a file is selected, DemoFileSelected():
 2. Reads file metadata with FileSystem::Stat().
 3. Opens the file with the read-only UI::File wrapper.
 4. Reads a bounded preview according to the current settings.
-5. Replaces non-printable bytes and applies the selected ASCII letter case.
+5. Formats the preview as printable text or hexadecimal bytes according to the Preview format setting.
 6. Closes the file before displaying the result.
 
 The result page is custom framebuffer UI. The demo does not write to or modify the selected file.
