@@ -69,10 +69,13 @@ build convention. UI_DIR defaults to ../ui.
 ## Lifecycle boundary
 
 The launcher is a low-level program started by the OS loader. It uses the
-UI Library's framebuffer and input APIs directly. The OS launcher environment
-continues to own calculator initialization and teardown; this program does
-not call calcInit() or calcEnd(). Framebuffer::Begin() attaches to the LCD VRAM
-already initialized by that environment.
+UI Library's framebuffer and input APIs directly. The launcher calls
+calcInit() once before drawing, which backs up the native calculator screen,
+and calcEnd() on exit, which restores that screen and refreshes the LCD.
+Before launching an HHK, BIN, or EXEC program, it restores the native screen
+first. This ensures a child application's own calcInit() backs up the native
+screen rather than the launcher's framebuffer. Framebuffer::Begin() itself
+still does not take ownership of calculator lifecycle or VRAM backup state.
 
 init.s, linker.ld, and main_bootstrap.cpp are unchanged. The bootstrap
 continues to return the SDK message-box result expected by the OS after the

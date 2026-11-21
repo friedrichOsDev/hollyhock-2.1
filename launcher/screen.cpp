@@ -1,3 +1,4 @@
+#include <sdk/calc/calc.hpp>
 #include <ui/framebuffer.hpp>
 #include <ui/input.hpp>
 #include "apps.hpp"
@@ -232,11 +233,15 @@ void LaunchSelected(UI::Framebuffer &fb, int selected,
     if (selected < 0 || selected >= total)
         return;
 
-    // Detach VRAM before another program takes control of the calculator.
+    // Stop drawing before another program takes control.
     fb.End();
     if (selected < apps) {
         Apps::EntryPoint entry = Apps::RunApp(selected);
         if (entry) {
+            // Restore the pre-launcher UI before transferring control. This
+            // also ensures that a child application's calcInit() backs up the
+            // native screen rather than the launcher's framebuffer.
+            calcEnd();
             entry();
             running = false;
             return;
@@ -244,6 +249,7 @@ void LaunchSelected(UI::Framebuffer &fb, int selected,
     } else if (selected < apps + bins) {
         Bins::EntryPoint entry = Bins::RunApp(selected - apps);
         if (entry) {
+            calcEnd();
             entry();
             running = false;
             return;
@@ -251,6 +257,7 @@ void LaunchSelected(UI::Framebuffer &fb, int selected,
     } else {
         Execs::EntryPoint entry = Execs::RunExec(selected - apps - bins);
         if (entry) {
+            calcEnd();
             entry();
             running = false;
             return;
