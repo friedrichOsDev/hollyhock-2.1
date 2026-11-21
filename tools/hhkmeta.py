@@ -91,19 +91,20 @@ def parse_bin(data: bytes) -> dict:
             if slot_end & 3:
                 raise MetadataError(f".bin {name} next field is not 4-byte aligned.")
         else:
-            # The final metadata field ends at the entry-point offset; the
-            # executable payload begins there.
-            slot_end = entry_offset
+            # The version field is followed by the BIN's 4-byte alignment
+            # padding. The executable stub may begin before e_entry, so do
+            # not use entry_offset as the metadata boundary.
+            slot_end = align(nul + 1, 4)
             if slot_end <= nul or any(data[nul + 1:slot_end]):
-                raise MetadataError(".bin version padding overlaps non-zero program data.")
+                raise MetadataError(".bin version alignment padding is not zero-filled.")
 
         if slot_end > len(data) or slot_end > entry_offset:
             raise MetadataError(f".bin {name} metadata overlaps the program entry point.")
         fields[name] = {"value": value, "start": start, "end": slot_end,
                         "capacity": slot_end - start}
         cursor = slot_end
-    if cursor != entry_offset:
-        raise MetadataError(".bin metadata does not end at the declared entry point.")
+    if cursor > entry_offset:
+        raise MetadataError(".bin metadata overlaps the declared entry point.")
     return {"format": "BIN", "fields": fields, "entry": entry,
             "base": base, "entry_offset": entry_offset}
 

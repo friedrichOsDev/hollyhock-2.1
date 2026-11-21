@@ -71,8 +71,13 @@ name and other information displayed by the launcher.
   `.hollyhock_*` ELF section exists in the file.
 - Metadata values are limited to printable ASCII (characters `0x20` through
   `0x7E`). This matches the launcher's current text display support.
-- Unused bytes in a fixed metadata slot are space-padded so the slot boundary
-  remains stable. This allows the tool to be run again on the patched file.
+- Unused bytes in fixed metadata slots are zero-padded, matching the
+  launcher's string parser and avoiding visible trailing spaces. The first
+  three BIN slots retain their detected boundaries because the next metadata
+  string marks their end. The final BIN version slot ends at its 4-byte
+  alignment boundary; after shortening the version, the reported maximum for
+  that field can therefore shrink. To make a later, longer version change,
+  start again from the untouched original BIN or rebuild the application.
 
 Always keep a copy of the original application until you have tested the
 patched file on the calculator.
