@@ -42,6 +42,12 @@ Open the launcher and select your application to launch it. Have fun!
 
 **Important:** The launcher's display name comes from metadata embedded in the compiled program, not from the current filename. Renaming `myapp.hhk` to `Python.hhk`, for example, does not change an embedded `APP_NAME`. To inspect or change metadata after compilation, use the [compiled metadata guide](metadata.md) and `tools/hhkmeta.py`. This is useful when you only want to rename an already-built program and do not want to relink it.
 
+When the filename and embedded name should be changed together, use the
+`rename` command. For example,
+`python3 tools/hhkmeta.py rename PythonExtra-hh2.bin PythonExtra.bin`
+renames the file and sets its embedded display name to `PythonExtra`.
+
+
 ## Newlib
 If you want to use C standard libraries such as math.h, string.h and others when developing for the fx-CP400, you must have a standard library implementation such as Newlib installed. Newlib also includes division and other arithmetic subroutines for our SuperH CPU, so that you do not have to always add them to your project manualy when you need them.
 

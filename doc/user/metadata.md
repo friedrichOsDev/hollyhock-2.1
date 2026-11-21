@@ -56,6 +56,27 @@ Copy the resulting `.bin` or `.hhk` file to the calculator as usual. The
 filename can be changed independently if desired; the metadata controls the
 name and other information displayed by the launcher.
 
+## Rename the file and embedded program name together
+
+Use the `rename` command when the filename and the metadata name must match.
+The destination filename (without its extension) becomes the embedded launcher
+name. The command supports both `.bin` and `.hhk` files:
+
+```sh
+python3 tools/hhkmeta.py rename PythonExtra-hh2.bin PythonExtra.bin
+```
+
+For the example above, the tool changes the embedded name to `PythonExtra`,
+writes `PythonExtra.bin`, and removes the old `PythonExtra-hh2.bin` path only
+after the new file has been written successfully. The description, author,
+version, load address, entry point, and executable code are preserved.
+
+The destination must use the same format extension as the source. An existing
+destination is never overwritten. If the new display name does not fit in the
+compiled metadata slot, the command fails and leaves the original file
+untouched. If source deletion fails after the new file is written, the tool
+reports the situation and keeps both files.
+
 ## Important limits
 
 - The tool preserves the program's load address, entry point and executable

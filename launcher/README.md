@@ -30,10 +30,14 @@ rebuilding it:
 ```sh
 python3 tools/hhkmeta.py show application.bin
 python3 tools/hhkmeta.py set application.bin --name "New Display Name"
+python3 tools/hhkmeta.py rename PythonExtra-hh2.bin PythonExtra.bin
 ```
 
-Run the commands from the repository root. The tool creates a
-`.patched.bin` or `.patched.hhk` output by default. See the
+Run the commands from the repository root. The `set` command creates a
+`.patched.bin` or `.patched.hhk` output by default. The `rename` command
+uses the destination filename (without extension) as the embedded name, writes
+the new file and then removes the old path. It refuses to overwrite an
+existing destination. See the
 [compiled metadata guide](../doc/user/metadata.md) for all options, backup
 behavior, and format limitations. An edit is refused when the new value does
 not fit in the metadata space already reserved by the compiled file.
