@@ -19,10 +19,12 @@ apps/
 ├── README.md
 └── <app-name>/
     ├── README.md       # Overview, requirements, build and usage instructions
-    ├── src/            # Source code (if applicable)
-    ├── include/        # Project-specific headers (if applicable)
-    ├── assets/         # Resources (if applicable)
-    └── ...             # App-specific files and build configuration
+    ├── build.sh        # Build script for the app
+    ├── Makefile        # Makefile for the app
+    ├── linker_*.ld     # Linker scripts for the app (bin linker and hhk linker)
+    ├── main.cpp        # Main source file for the app
+    ├── start.s         # Hollyhock startup code
+    └── ...             # App-specific files
 ```
 
 This is a suggested layout, not a requirement. Small projects may use a simpler structure, and projects with different languages or toolchains can organize their files as needed.
