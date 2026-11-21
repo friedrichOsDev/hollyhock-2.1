@@ -704,6 +704,8 @@ A palette based on the complete video is usually more reliable than a palette ba
 
 The encoder SHOULD create the RGB565-to-palette lookup table once. It MUST NOT perform a 256-colour nearest-neighbour search for every pixel in the normal encoding loop.
 
+Because the table contains only 65,536 entries, its construction is a one-time operation. Implementations SHOULD build it using vectorised operations or compiled native code. The main frame loop SHOULD also use vectorised operations or a compiled fast path for RGB565 conversion, palette mapping, and pixel comparison. A pure Python loop that performs several Python-level operations for every pixel is discouraged for full-resolution 10 FPS conversion.
+
 The calculator decoder does not need this lookup table. It only needs the palette stored in the file.
 
 ### 13.4 Frame encoding algorithm
@@ -1178,10 +1180,13 @@ A meaningful comparison records:
 - Output frame rate.
 - Encoder quality setting and palette count.
 - Keyframe interval.
-- Output file size.
-- Conversion wall-clock time.
+- Output file size and bytes per second.
+- Normalised bytes per decoded pixel, calculated as `file_size / (width × height × stored_frame_rate × duration_seconds)` for constant-rate source sampling.
+- Conversion wall-clock time and conversion speed in source-seconds per wall-clock-second.
 - Average and peak decode time per frame.
 - Visual quality of representative scenes.
+
+When comparing the legacy encoder with CPV v1, both MUST use the same source clip, output dimensions, frame rate, and as closely matched a visual quality target as practical. A 24-minute legacy file at a small resolution and low frame rate cannot be compared directly with a 30-second 528 × 320, 10 FPS file.
 
 The 10 FPS target is a performance goal, not a guaranteed result.
 
