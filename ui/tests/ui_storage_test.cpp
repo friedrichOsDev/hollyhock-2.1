@@ -206,6 +206,11 @@ int main() {
           "Save rejects invalid variable names");
     Check(store.Save("SETTINGS", VARTYPE_STR, 0, 1) == EINVAL,
           "Save rejects a null data pointer");
+    setResult = MCS_NO_FOLDER;
+    Check(store.Save("SETTINGS", VARTYPE_STR, payload,
+                     sizeof(payload)) == MCS_NO_FOLDER,
+          "Save propagates MCS errors");
+    setResult = 0;
 
     store.Close();
     Check(!store.IsOpen() && store.Folder() == 0 &&
