@@ -102,16 +102,6 @@ The all target creates app_template.hhk and app_template.bin. Use make -C app_te
 
 Copy app_template/app_template.hhk to the root of the calculator's fls0 storage. Open the Hollyhock launcher and run the application.
 
-The demo shows the read-only file browser, file metadata and read preview, settings, and persistent settings in the UIDEMO MCS folder. Change a setting, exit, and launch the demo again to verify that the value is restored.
-
-A separate read-only API test application is available in ui_test/. Build it with:
-
-~~~sh
-./ui_test/build.sh
-~~~
-
-It tests path validation, directory enumeration, file filtering, metadata, opening, seeking, reading, and handle cleanup. Its settings use a separate UITEST MCS folder.
-
 ## 7. Keep referenced data alive
 
 UI::Application stores a copy of UI::Config, but pointer fields remain pointers to application-owned data. Keep the following alive until Run() returns:

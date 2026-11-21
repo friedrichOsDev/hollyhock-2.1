@@ -92,7 +92,7 @@ Boolean values need valid bool storage. Integer values should start within confi
 
 Persistence is optional. Set config.settingsFolder to a unique MCS folder name for the application. The SDK's MCS folder API truncates names longer than eight characters, so the UI Library rejects names outside 1-8 ASCII letters or digits instead of silently allowing collisions. Names are normalized to uppercase.
 
-For example, the demo uses UIDEMO and ui_test uses UITEST. Give every application a distinct, stable folder name. The folder is created automatically on first run.
+For example, the demo uses UIDEMO. Give every application a distinct, stable folder name. The folder is created automatically on first run.
 
 When settingsFolder is set, UI::Application loads saved settings before showing the first menu. It saves settings after a settings entry is selected and once again when Run() exits normally. When the SETTINGS variable does not exist yet, the library now immediately writes the application's default settings to MCS during startup. This creates a visible SETTINGS variable on the first launch rather than waiting for the first settings interaction or application exit.
 
