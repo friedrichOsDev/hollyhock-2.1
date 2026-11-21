@@ -115,7 +115,6 @@ int main() {
           "legacy values are restored");
 
     // Legacy parsing remains strict and atomic on malformed input.
-    legacyPreview = false;\n    legacyBytes = 8;
     legacyPreview = false;
     legacyBytes = 8;
     Check(!UI::Detail::ParseSettings("UIST1;2;B1;Ix;",
