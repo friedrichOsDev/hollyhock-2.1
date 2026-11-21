@@ -53,16 +53,33 @@ void CopyLimit(char *dst, const char *src, int cap, int limit) {
     dst[i] = 0;
 }
 void AppendNumber(char *dst, int number, int cap) {
-    if (number < 0) number = 0;
+    if (!dst || cap <= 0)
+        return;
+    if (number < 0)
+        number = 0;
+
     char reversed[12];
     int count = 0;
     do {
-        int digit = 0;
-        while (number >= 10) { number -= 10; ++digit; }
-        reversed[count++] = static_cast<char>('0' + digit);
+        // Extract the remainder as the next decimal digit and carry the
+        // quotient into the next iteration. This avoids SH-4 division and
+        // modulo helpers while always making progress, including for 0..9.
+        int quotient = 0;
+        while (number >= 10) {
+            number -= 10;
+            ++quotient;
+        }
+        reversed[count++] = static_cast<char>('0' + number);
+        number = quotient;
     } while (number > 0 && count < static_cast<int>(sizeof(reversed)));
+
     int pos = Length(dst);
-    while (count > 0 && pos < cap - 1) dst[pos++] = reversed[--count];
+    if (pos >= cap) {
+        dst[cap - 1] = 0;
+        return;
+    }
+    while (count > 0 && pos < cap - 1)
+        dst[pos++] = reversed[--count];
     dst[pos] = 0;
 }
 int DividePositive(int value, int divisor) {
