@@ -23,6 +23,10 @@ public:
     int SelectFile(const char *path);
     const char *CurrentDirectory() const;
     int SetCurrentDirectory(const char *path);
+    Setting *GetSettings();
+    int GetSettingCount() const;
+    int AdjustSetting(int index, int direction = 1);
+    bool FileMatchesFilter(const char *filename) const;
     bool IsRunning() const;
     int SettingsPersistenceResult() const;
 };
