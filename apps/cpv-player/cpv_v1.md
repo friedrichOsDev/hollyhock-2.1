@@ -1127,7 +1127,9 @@ The legacy format primarily represented changed pixels as repeated single-index 
 
 CPV v1 adds INDEX_LITERAL. A mixed sequence can now be stored as one packet containing consecutive palette indices. This is particularly useful for detailed animation, photographic texture, and gameplay.
 
-The v1 packet header also defines short and long runs for four packet types, with 1-byte headers for runs up to 32 pixels and 2-byte headers up to 8,191 pixels.
+The v1 packet header also defines short and long runs for four packet types. One-byte headers encode 1–32 pixels; two-byte headers encode 33–8,191 pixels.
+
+This is a deliberate trade-off. The legacy packet header could encode 1–63 pixels in one byte and up to 16,383 pixels in two bytes, but it only distinguished DATA from SKIP. CPV v1 spends one additional header bit on the long-length form so it can identify INDEX_LITERAL, INDEX_REPEAT, SKIP, and RAW565 directly, without an extra mode byte on every data packet. This keeps data packets compact and makes decoding straightforward. Whether this trade-off wins for a particular video depends on its distribution of skip and data run lengths, so the host benchmark SHOULD report packet counts and bytes by opcode.
 
 ### 22.2 Explicit keyframes
 
