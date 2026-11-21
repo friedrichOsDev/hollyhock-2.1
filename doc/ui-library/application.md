@@ -29,7 +29,8 @@ Include:
 | showSettings | bool | false | Enables built-in settings |
 | showQuit | bool | true | Shows Quit |
 | manageCalculatorLifecycle | bool | true | Library calls calcInit() and calcEnd() |
-| onStart, onSettings | ActionCallback | null | Start and custom settings callbacks |
+| onStart | ActionCallback | null | Start callback (or whole custom main screen when showMainMenu is false) |
+| onSettings | ActionCallback | null | Settings callback used when no Setting array is configured |
 | onFileSelected | FileCallback | null | Called after file selection |
 | filters | const FileFilter * | null | File extension filters |
 | filterCount | int | 0 | Number of filters |
@@ -96,9 +97,9 @@ config.settingsRenderer = UI::MenuRenderer::Framebuffer;
 - `Framebuffer` uses the library's built-in menu drawing and normalized input handling.
 - `Custom` invokes the matching `onCustom...` callback. The callback owns drawing and input processing; Application continues to own calculator lifecycle, settings persistence, and menu-state transitions.
 
-A Custom renderer without a callback safely falls back to Native. Custom callbacks should run their own input loop and return after requesting a transition. A custom main-menu callback that returns while the application is still in the main-menu state exits the application, matching the legacy `onStart` custom-screen behavior. Custom file-selector and settings callbacks that return without changing state return to the main menu.
+A Custom renderer without its matching callback safely falls back to Native. Custom callbacks own their drawing and input loops, but must use the Application methods to request state changes. A custom main-menu callback that returns while the application is still in the main-menu state exits the application, matching the legacy `onStart` custom-screen behavior. A custom file-selector or settings callback that returns while its own state is still active returns to the main menu. If the callback changes the state itself, that requested state is preserved.
 
-The built-in framebuffer main menu supports UP/DOWN, EXE, and touch. The framebuffer file selector supports UP/DOWN, LEFT/RIGHT page navigation, EXE, BACKSPACE to move to the parent directory, touch, and the action-bar Escape event. The framebuffer settings menu supports UP/DOWN, LEFT/RIGHT value changes, EXE, touch, and page navigation. File and settings page sizes adapt to the LCD height, up to five rows per page.
+The built-in framebuffer main menu supports UP/DOWN, EXE, and touch. The framebuffer file selector supports UP/DOWN, LEFT/RIGHT page navigation, EXE, BACKSPACE to move to the parent directory, touch, and the action-bar Escape event. The framebuffer settings menu supports UP/DOWN, LEFT/RIGHT value changes, EXE, touch, and page navigation. The file selector and Framebuffer settings screen adapt their page size to the LCD height, up to five rows per page. The Native file selector and settings dialog use five entries per page.
 
 ## Custom main menu
 
@@ -207,7 +208,7 @@ When the MCS store is open, AdjustSetting() saves after applying a change. Direc
 | Enumeration | Setting::Enumeration() | int * | Moves forward/backward through options and wraps |
 | Action | Setting::Action() | none | Calls callback for a positive adjustment |
 
-Setting descriptions are stored. The Framebuffer settings renderer shows the selected setting's description; the Native SDK settings dialog does not currently display it.
+Setting descriptions are stored. The Framebuffer settings renderer shows the selected setting's description; the Native SDK settings dialog does not currently display it. The Custom renderer decides how and where descriptions are drawn.
 
 ### Persistent settings
 
@@ -244,5 +245,5 @@ Framebuffer does not own this lifecycle. Create framebuffer objects at runtime a
 - The built-in menu is a simple button-based interface, not a widget system.
 - The framebuffer draws directly into VRAM and does not use a second buffer.
 - The built-in font supports printable ASCII 32-126.
-- The file selector supports fls0 only, collects 64 entries per directory, and displays five per page.
+- The built-in file selectors support fls0 only and collect at most 64 entries per directory. Native selectors display five entries per page; the Framebuffer selector adapts to LCD height. Custom selectors define their own page layout.
 - Non-ASCII file and directory names are shown as question marks.
