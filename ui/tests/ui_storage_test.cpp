@@ -119,7 +119,6 @@ extern "C" int MCS_SetVariable(
     const uint8_t *source = static_cast<const uint8_t *>(data);
     for (uint32_t i = 0; i < size; ++i)
         lastData[i] = source[i];
-    setResult = setResult;
     return setResult;
 }
 
