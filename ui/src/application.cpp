@@ -146,6 +146,21 @@ void Append(char *d, const char *s, int cap) {
     if (length < cap - 1)
         Copy(d + length, s, cap - length);
 }
+// SH-4 has no inexpensive signed integer divide instruction. The UI target
+// is freestanding and does not link libgcc, so avoid generating runtime
+// division helpers for small, non-negative menu indices and coordinates.
+int DividePositive(int dividend, int divisor) {
+    if (dividend <= 0 || divisor <= 0)
+        return 0;
+
+    int quotient = 0;
+    while (dividend >= divisor) {
+        dividend -= divisor;
+        ++quotient;
+    }
+    return quotient;
+}
+
 void Number(int v, char *out, int cap) {
     if (cap <= 0)
         return;
@@ -608,12 +623,45 @@ bool ParseSettings(const char *data, const Setting *settings, int count) {
 } // namespace
 
 Application::Application(const Config &config)
-    : m_config(config),
+    : m_config(),
       m_state(StateMainMenu),
       m_lifecycleStarted(false),
       m_persistenceInitialized(false),
       m_persistenceReady(false),
       m_persistenceResult(0) {
+    // Copy Config field-by-field. A whole-struct copy can make the SH-4
+    // compiler emit __movmem_i4_odd, which is unavailable in our -nostdlib
+    // application link.
+    m_config.title = config.title;
+    m_config.startLabel = config.startLabel;
+    m_config.filesLabel = config.filesLabel;
+    m_config.settingsLabel = config.settingsLabel;
+    m_config.quitLabel = config.quitLabel;
+    m_config.settingsFolder = config.settingsFolder;
+
+    m_config.showMainMenu = config.showMainMenu;
+    m_config.showStart = config.showStart;
+    m_config.showFileSelector = config.showFileSelector;
+    m_config.showSettings = config.showSettings;
+    m_config.showQuit = config.showQuit;
+    m_config.manageCalculatorLifecycle = config.manageCalculatorLifecycle;
+
+    m_config.mainMenuRenderer = config.mainMenuRenderer;
+    m_config.fileSelectorRenderer = config.fileSelectorRenderer;
+    m_config.settingsRenderer = config.settingsRenderer;
+
+    m_config.onStart = config.onStart;
+    m_config.onSettings = config.onSettings;
+    m_config.onFileSelected = config.onFileSelected;
+    m_config.onCustomMainMenu = config.onCustomMainMenu;
+    m_config.onCustomFileSelector = config.onCustomFileSelector;
+    m_config.onCustomSettings = config.onCustomSettings;
+
+    m_config.filters = config.filters;
+    m_config.filterCount = config.filterCount;
+    m_config.settings = config.settings;
+    m_config.settingCount = config.settingCount;
+
     Copy(m_currentDirectory, "\\fls0\\", sizeof(m_currentDirectory));
 }
 Application::~Application() {
@@ -1125,8 +1173,8 @@ bool Application::RunFramebufferMainMenu() {
 
         int rowHeight = 38;
         const int available = screen.Height() - top - 30;
-        if (count > 0 && available / count < rowHeight)
-            rowHeight = available / count;
+        if (count > 0 && DividePositive(available, count) < rowHeight)
+            rowHeight = DividePositive(available, count);
         if (rowHeight < 18)
             rowHeight = 18;
 
@@ -1168,11 +1216,13 @@ bool Application::RunFramebufferMainMenu() {
             if (event.type == EventKey &&
                 event.keyAction == KeyPressed) {
                 if (event.keyCode == KeyUp) {
-                    selected = (selected + count - 1) % count;
+                    selected = selected == 0 ? count - 1 : selected - 1;
                     break;
                 }
                 if (event.keyCode == KeyDown) {
-                    selected = (selected + 1) % count;
+                    ++selected;
+                    if (selected >= count)
+                        selected = 0;
                     break;
                 }
                 if (event.keyCode == KeyEXE) {
@@ -1186,7 +1236,7 @@ bool Application::RunFramebufferMainMenu() {
             } else if (event.type == EventTouch &&
                        event.touchAction == TouchDown) {
                 const int y = event.y;
-                const int row = (y - top) / rowHeight;
+                const int row = DividePositive(y - top, rowHeight);
                 if (y >= top && row >= 0 && row < count) {
                     selected = row;
                     activate = true;
@@ -1246,7 +1296,7 @@ bool Application::RunFramebufferFileSelector() {
     const int rowTop = 64;
     const int rowHeight = 32;
     const int footerY = screen.Height() - 36;
-    int rowsPerPage = (footerY - rowTop - 4) / rowHeight;
+    int rowsPerPage = DividePositive(footerY - rowTop - 4, rowHeight);
     if (rowsPerPage > ROWS)
         rowsPerPage = ROWS;
     if (rowsPerPage < 1)
@@ -1258,14 +1308,14 @@ bool Application::RunFramebufferFileSelector() {
     Scan(m_currentDirectory, m_config, entries, &count);
 
     while (!done && m_state == StateFileSelector) {
-        int pages = (count + rowsPerPage - 1) / rowsPerPage;
+        int pages = DividePositive(count + rowsPerPage - 1, rowsPerPage);
         if (pages < 1)
             pages = 1;
         if (selected < 0)
             selected = 0;
         if (selected >= count && count > 0)
             selected = count - 1;
-        int page = selected / rowsPerPage;
+        int page = DividePositive(selected, rowsPerPage);
         if (page >= pages)
             page = pages - 1;
         const int first = page * rowsPerPage;
@@ -1375,14 +1425,15 @@ bool Application::RunFramebufferFileSelector() {
                        event.touchAction == TouchDown) {
                 const int y = event.y;
                 if (y >= rowTop && y < rowTop + rowsPerPage * rowHeight) {
-                    const int row = (y - rowTop) / rowHeight;
+                    const int row = DividePositive(y - rowTop, rowHeight);
                     const int index = first + row;
                     if (row < visible && index < count) {
                         selected = index;
                         activate = true;
                     }
-                } else if (y >= footerY) {
-                    const int action = event.x / buttonWidth;
+                } else if (y >= footerY &&
+                           event.x >= 0 && event.x < screen.Width()) {
+                    const int action = DividePositive(event.x, buttonWidth);
                     if (action >= 0 && action < 4)
                         footerAction = action;
                 }
@@ -1473,21 +1524,21 @@ bool Application::RunFramebufferSettings() {
     const int rowHeight = 34;
     const int footerY = screen.Height() - 34;
     const int descriptionY = footerY - 10;
-    int rowsPerPage = (descriptionY - rowTop - 4) / rowHeight;
+    int rowsPerPage = DividePositive(descriptionY - rowTop - 4, rowHeight);
     if (rowsPerPage > ROWS)
         rowsPerPage = ROWS;
     if (rowsPerPage < 1)
         rowsPerPage = 1;
 
     while (!done && m_state == StateSettings) {
-        int pages = (m_config.settingCount + rowsPerPage - 1) / rowsPerPage;
+        int pages = DividePositive(m_config.settingCount + rowsPerPage - 1, rowsPerPage);
         if (pages < 1)
             pages = 1;
         if (selected < 0)
             selected = 0;
         if (selected >= m_config.settingCount)
             selected = m_config.settingCount - 1;
-        const int page = selected / rowsPerPage;
+        const int page = DividePositive(selected, rowsPerPage);
         const int first = page * rowsPerPage;
         int visible = m_config.settingCount - first;
         if (visible > rowsPerPage)
@@ -1557,12 +1608,14 @@ bool Application::RunFramebufferSettings() {
             if (event.type == EventKey &&
                 event.keyAction == KeyPressed) {
                 if (event.keyCode == KeyUp) {
-                    selected = (selected + m_config.settingCount - 1) %
-                               m_config.settingCount;
+                    selected = selected == 0
+                        ? m_config.settingCount - 1 : selected - 1;
                     break;
                 }
                 if (event.keyCode == KeyDown) {
-                    selected = (selected + 1) % m_config.settingCount;
+                    ++selected;
+                    if (selected >= m_config.settingCount)
+                        selected = 0;
                     break;
                 }
                 if (event.keyCode == KeyLeft) {
@@ -1585,13 +1638,14 @@ bool Application::RunFramebufferSettings() {
                        event.touchAction == TouchDown) {
                 if (event.y >= rowTop &&
                     event.y < rowTop + rowsPerPage * rowHeight) {
-                    const int row = (event.y - rowTop) / rowHeight;
+                    const int row = DividePositive(event.y - rowTop, rowHeight);
                     if (row < visible) {
                         selected = first + row;
                         activate = true;
                     }
-                } else if (event.y >= footerY) {
-                    const int action = event.x / buttonWidth;
+                } else if (event.y >= footerY &&
+                           event.x >= 0 && event.x < screen.Width()) {
+                    const int action = DividePositive(event.x, buttonWidth);
                     if (action >= 0 && action < 3)
                         footerAction = action;
                 }
