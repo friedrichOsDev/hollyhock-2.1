@@ -30,8 +30,11 @@ void CopyText(char *destination, const char *source, int capacity) {
 }
 
 void AppendText(char *destination, const char *source, int capacity) {
+    if (!destination || !source || capacity <= 0)
+        return;
+
     int length = 0;
-    while (destination[length] && length < capacity)
+    while (length < capacity && destination[length])
         ++length;
     if (length < capacity - 1)
         CopyText(destination + length, source, capacity - length);
@@ -477,10 +480,13 @@ void DemoStart(UI::Application &app) {
             }
         } else if (event.type == UI::EventTouch &&
                    event.touchAction == UI::TouchDown) {
-            const int row = DivideNonNegative(event.y - 76, 38);
-            if (event.y >= 76 && row >= 0 && row < DEMO_ROWS) {
-                selected = row;
-                activate = true;
+            if (event.y >= 76 &&
+                event.y < 76 + DEMO_ROWS * 38) {
+                const int row = DivideNonNegative(event.y - 76, 38);
+                if (row >= 0 && row < DEMO_ROWS) {
+                    selected = row;
+                    activate = true;
+                }
             }
         }
 
