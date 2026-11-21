@@ -2,9 +2,9 @@
 #include <ui/ui.hpp>
 
 APP_NAME("Hollyhock UI Library Demo")
-APP_DESCRIPTION("Custom framebuffer UI with touch, keys, files and settings")
+APP_DESCRIPTION("Per-menu native, framebuffer and custom UI renderer demo")
 APP_AUTHOR("Friedrich")
-APP_VERSION("1.3")
+APP_VERSION("1.4")
 
 static bool showPreview = true;
 static int previewLength = 24;
@@ -288,12 +288,19 @@ extern "C" void main() {
     config.title = "Hollyhock UI Demo";
     config.settingsFolder = "UIDEMO";
 
-    // Use the library's lifecycle and persistence, but own the whole screen.
-    config.showMainMenu = false;
-    config.showStart = false;
+    // Demonstrate independent renderers:
+    // - the library draws the main menu into LCD VRAM,
+    // - the existing SDK dialog handles file selection,
+    // - the library draws the built-in settings screen into LCD VRAM.
+    config.showMainMenu = true;
+    config.showStart = true;
     config.showFileSelector = true;
     config.showSettings = true;
-    config.showQuit = false;
+    config.showQuit = true;
+
+    config.mainMenuRenderer = UI::MenuRenderer::Framebuffer;
+    config.fileSelectorRenderer = UI::MenuRenderer::Native;
+    config.settingsRenderer = UI::MenuRenderer::Framebuffer;
 
     config.onStart = StartApplication;
     config.onFileSelected = FileSelected;
