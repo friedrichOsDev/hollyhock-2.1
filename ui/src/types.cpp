@@ -58,7 +58,8 @@ bool MatchesExtension(const char *filename, const char *extension) {
 } // namespace
 
 Setting::Setting()
-    : name(0),
+    : id(0),
+      name(0),
       description(0),
       type(SettingBoolean),
       value(0),
@@ -71,7 +72,14 @@ Setting::Setting()
 
 Setting Setting::Boolean(const char *settingName, bool *settingValue,
                          const char *settingDescription) {
+    return Boolean(0, settingName, settingValue, settingDescription);
+}
+
+Setting Setting::Boolean(const char *settingId, const char *settingName,
+                         bool *settingValue,
+                         const char *settingDescription) {
     Setting setting;
+    setting.id = settingId;
     setting.name = settingName;
     setting.description = settingDescription;
     setting.type = SettingBoolean;
@@ -82,7 +90,16 @@ Setting Setting::Boolean(const char *settingName, bool *settingValue,
 Setting Setting::Integer(const char *settingName, int *settingValue,
                          int settingMinimum, int settingMaximum,
                          int settingStep, const char *settingDescription) {
+    return Integer(0, settingName, settingValue, settingMinimum,
+                   settingMaximum, settingStep, settingDescription);
+}
+
+Setting Setting::Integer(const char *settingId, const char *settingName,
+                         int *settingValue, int settingMinimum,
+                         int settingMaximum, int settingStep,
+                         const char *settingDescription) {
     Setting setting;
+    setting.id = settingId;
     setting.name = settingName;
     setting.description = settingDescription;
     setting.type = SettingInteger;
@@ -97,7 +114,17 @@ Setting Setting::Enumeration(const char *settingName, int *settingValue,
                              const char *const *settingOptions,
                              int settingOptionCount,
                              const char *settingDescription) {
+    return Enumeration(0, settingName, settingValue, settingOptions,
+                       settingOptionCount, settingDescription);
+}
+
+Setting Setting::Enumeration(const char *settingId, const char *settingName,
+                             int *settingValue,
+                             const char *const *settingOptions,
+                             int settingOptionCount,
+                             const char *settingDescription) {
     Setting setting;
+    setting.id = settingId;
     setting.name = settingName;
     setting.description = settingDescription;
     setting.type = SettingEnum;
@@ -111,7 +138,14 @@ Setting Setting::Enumeration(const char *settingName, int *settingValue,
 
 Setting Setting::Action(const char *settingName, ActionCallback callback,
                         const char *settingDescription) {
+    return Action(0, settingName, callback, settingDescription);
+}
+
+Setting Setting::Action(const char *settingId, const char *settingName,
+                        ActionCallback callback,
+                        const char *settingDescription) {
     Setting setting;
+    setting.id = settingId;
     setting.name = settingName;
     setting.description = settingDescription;
     setting.type = SettingAction;
