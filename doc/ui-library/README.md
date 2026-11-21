@@ -28,7 +28,7 @@ This restriction does not modify the Hollyhock SDK. Its lower-level file functio
 
 ## Persistent settings
 
-Set UI::Config::settingsFolder to a unique 1-8 character alphanumeric MCS folder name to enable automatic loading and saving of built-in settings. The library creates the folder on first use, loads settings before the main menu, saves after setting changes, and saves again on normal exit. Names longer than eight characters are rejected to avoid the SDK's silent folder-name truncation.
+Set UI::Config::settingsFolder to a unique 1-8 character alphanumeric MCS folder name to enable automatic loading and saving of built-in settings. The library creates the folder and immediately persists the initial default settings when the SETTINGS variable is missing. Subsequent setting changes are saved automatically, and the application saves once more on normal exit. Names longer than eight characters are rejected to avoid the SDK's silent folder-name truncation.
 
 The automatic serializer supports at most 32 settings and a payload smaller than 512 bytes. See the application guide for its format and limits. Applications can use UI::PersistentStore for their own MCS variables and data.
 
