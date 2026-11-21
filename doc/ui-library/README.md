@@ -63,7 +63,7 @@ From the repository root:
 ./app_template/build.sh
 ~~~
 
-This builds the SDK, UI library, and custom framebuffer demo. Copy app_template/app_template.hhk to the calculator's fls0 root and launch it with the Hollyhock launcher.
+This builds the SDK, UI library, and the multi-renderer UI Library showcase. Copy app_template/app_template.hhk to the calculator's fls0 root and launch it with the Hollyhock launcher.
 
 ## Host tests
 
