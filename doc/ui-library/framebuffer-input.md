@@ -160,7 +160,7 @@ Each menu can independently select Native, Framebuffer, or Custom rendering. A c
 - Begin() validates the VRAM pointer and dynamic LCD dimensions. Each dimension must be positive and no greater than 16384; the total image is capped at 1,048,576 pixels.
 - SetPixel() rejects out-of-range coordinates.
 - Rectangle drawing clips to the visible display.
-- Line endpoints are range-checked before clipping and rasterization.
+- DrawLine() accepts endpoints only in the range -16383 to 16383 on each axis. It rasterizes the line between those endpoints and writes only pixels that fall inside the LCD bounds.
 - Drawing performs no dynamic allocation.
 - End() is idempotent; drawing after detaching is rejected.
 - Framebuffer does not manage the global LCD backup/restore lifecycle.
