@@ -72,7 +72,7 @@ void ShowBrowserDiagnostics(UI::Application &app) {
     UI::PersistentStore store;
     int storeResult = store.Open("UITEST");
     int saveResult = storeResult;
-    int loadResult = storeResult;
+    int loadResult = -999; // Not attempted unless MCS_SetVariable succeeds.
     bool roundTrip = false;
     const char expected[] = "UI MCS API OK";
     char actual[32] = {0};
@@ -83,11 +83,20 @@ void ShowBrowserDiagnostics(UI::Application &app) {
         if (saveResult == 0) {
             loadResult = store.Load("APITEST", &storedType, actual,
                                     sizeof(actual), &storedSize);
+            const uint32_t expectedStoredSize =
+                ((uint32_t)sizeof(expected) + 3U) & ~3U;
             if (loadResult == 0 && storedType == VARTYPE_STR &&
-                storedSize == sizeof(expected)) {
+                storedSize == expectedStoredSize) {
                 roundTrip = true;
                 for (unsigned int i = 0; i < sizeof(expected); ++i) {
                     if (actual[i] != expected[i]) {
+                        roundTrip = false;
+                        break;
+                    }
+                }
+                for (uint32_t i = (uint32_t)sizeof(expected);
+                     i < storedSize; ++i) {
+                    if (actual[i] != 0) {
                         roundTrip = false;
                         break;
                     }
