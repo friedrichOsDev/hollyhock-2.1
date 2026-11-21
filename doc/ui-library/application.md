@@ -35,6 +35,12 @@ Include:
 | filterCount | int | 0 | Number of filters |
 | settings | Setting * | null | Built-in setting array |
 | settingCount | int | 0 | Number of settings |
+| mainMenuRenderer | MenuRenderer | Native | Main-menu presentation |
+| fileSelectorRenderer | MenuRenderer | Native | File-selector presentation |
+| settingsRenderer | MenuRenderer | Native | Settings presentation |
+| onCustomMainMenu | ActionCallback | null | Custom main-menu event loop |
+| onCustomFileSelector | ActionCallback | null | Custom file-selector event loop |
+| onCustomSettings | ActionCallback | null | Custom settings event loop |
 
 Keep all strings and arrays referenced by Config alive for the entire call to Run().
 
@@ -73,7 +79,48 @@ extern "C" void main() {
 
 See framebuffer-input.md for drawing and event examples.
 
-## Callbacks
+## Per-menu renderers
+
+Each built-in menu can choose its renderer independently. All three renderers default to Native, preserving existing applications.
+
+~~~cpp
+UI::Config config;
+config.mainMenuRenderer = UI::MenuRenderer::Framebuffer;
+config.fileSelectorRenderer = UI::MenuRenderer::Native;
+config.settingsRenderer = UI::MenuRenderer::Framebuffer;
+~~~
+
+- `Native` uses the existing Hollyhock SDK dialogs.
+- `Framebuffer` uses the library's built-in menu drawing and normalized input handling.
+- `Custom` invokes the matching `onCustom...` callback. The callback owns drawing and input processing; Application continues to own calculator lifecycle, settings persistence, and menu-state transitions.
+
+A Custom renderer without a callback safely falls back to Native. Custom callbacks should run their own input loop and return after requesting a transition. A custom main-menu callback that returns while the application is still in the main-menu state exits the application, matching the legacy `onStart` custom-screen behavior. Custom file-selector and settings callbacks that return without changing state return to the main menu.
+
+The built-in framebuffer main menu supports UP/DOWN, EXE, and touch. The framebuffer file selector supports UP/DOWN, LEFT/RIGHT page navigation, EXE, BACKSPACE to move to the parent directory, touch, and the action-bar Escape event. The framebuffer settings menu supports UP/DOWN, LEFT/RIGHT value changes, EXE, touch, and page navigation.
+
+## Custom file selector API
+
+A custom file selector can reuse the application's current directory and report a selected path through the central selection method:
+
+~~~cpp
+static void CustomFiles(UI::Application &app) {
+    // Draw entries from app.CurrentDirectory() using Directory and Framebuffer.
+    // On directory navigation:
+    app.SetCurrentDirectory("fls0/folder/");
+    // When the user chooses a file:
+    app.SelectFile("fls0/folder/readme.txt");
+    // The library normalizes the path, invokes onFileSelected,
+    // and returns to the main menu unless the callback requests another state.
+}
+
+UI::Config config;
+config.fileSelectorRenderer = UI::MenuRenderer::Custom;
+config.onCustomFileSelector = CustomFiles;
+~~~
+
+`CurrentDirectory()` returns the current selector path. `SetCurrentDirectory()` normalizes and stores a path and ensures it ends in a backslash; it does not test whether the directory exists. `SelectFile()` is valid while the application is in the file-selector state. It returns zero on success or a negative error code for an invalid state or path. The selected path passed to `onFileSelected` is valid for the duration of that callback.
+
+## Callbacks## Callbacks
 
 ~~~cpp
 typedef void (*ActionCallback)(Application &app);
