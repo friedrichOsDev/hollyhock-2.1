@@ -3,7 +3,7 @@ TARGET := cpv_convert
 CXXFLAGS ?= -O3 -march=native -flto -DNDEBUG -std=c++17 -Wall -Wextra -Wpedantic
 CPPFLAGS ?= -D_FILE_OFFSET_BITS=64
 LDFLAGS ?=
-LDLIBS ?= -lz -llz4
+LDLIBS ?= -lz -llz4 -ldeflate
 
 .PHONY: all clean test
 all: $(TARGET)

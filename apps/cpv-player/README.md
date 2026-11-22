@@ -6,19 +6,19 @@ A Hollyhock 2.1 application for playing CPV video files on the Casio fx-CP400. T
 
 - C++17 compiler (GCC or Clang).
 - FFmpeg and FFprobe executables.
-- zlib and LZ4 development libraries.
+- zlib, LZ4 and libdeflate development libraries.
 - Python 3, NumPy and Tkinter only for the reference preview player and integration tests.
 
 On Arch Linux / CachyOS:
 
 ~~~bash
-sudo pacman -S base-devel ffmpeg zlib lz4 python-numpy tk
+sudo pacman -S base-devel ffmpeg zlib lz4 libdeflate python-numpy tk
 ~~~
 
 On Debian / Ubuntu:
 
 ~~~bash
-sudo apt install build-essential ffmpeg zlib1g-dev liblz4-dev python3-numpy python3-tk
+sudo apt install build-essential ffmpeg zlib1g-dev liblz4-dev libdeflate-dev python3-numpy python3-tk
 ~~~
 
 ## Build the native converter
@@ -59,7 +59,7 @@ tools/cpv_convert input.mp4 \
 
 The input must be readable by FFmpeg. CPV v1 supports dimensions from 1×1 up to 528×320 pixels and frame rates greater than 0 and no greater than 30 FPS. By default, the converter preserves the source aspect ratio and fills unused space with black. Use --fit stretch to stretch to the exact target dimensions.
 
-FFmpeg performs video decoding, scaling, frame-rate conversion, hqdn3d filtering and palette generation. The computationally intensive encoder path is native C++: RGB565 conversion, 65,536-entry nearest-palette lookup, frame comparison, packet planning, bit packing, DELTA_MASK selection, global-motion search and prediction, compression selection, and CPV container output. Frames are streamed from FFmpeg and completed frame records are written to a temporary file; the complete video is never accumulated in RAM.
+FFmpeg performs video decoding, scaling, frame-rate conversion, hqdn3d filtering and palette generation. The computationally intensive encoder path is native C++: RGB565 conversion, 65,536-entry nearest-palette lookup, frame comparison, packet planning, bit packing, compression-aware DELTA_MASK selection, global-motion search and prediction, compression selection, and CPV container output. Frames are streamed from FFmpeg and completed frame records are written to a temporary file; the complete video is never accumulated in RAM.
 
 The adaptive global palette preserves the original 36-colour seed exactly: 12 hues (red, green, blue, yellow, cyan, magenta, orange, pink, spring green, violet, brown and grey), each in dark, normal and light variants. FFmpeg selects the remaining colours from the FPS-reduced and scaled source before denoising. Transparent palette padding is ignored and the first 36 palette entries always retain the seed order.
 
@@ -68,8 +68,8 @@ The adaptive global palette preserves the original 36-colour seed exactly: 12 hu
 CPV v1.1–v1.3 applies these optimisations:
 
 1. **Bit-packed palette indices.** INDEX_LITERAL and DELTA_MASK indices use the minimum width for the active palette: 4 bits for up to 16 colours, 5 bits for up to 32, 6 bits for up to 64, 7 bits for up to 128, and 8 bits for up to 256. INDEX_REPEAT keeps a one-byte index.
-2. **DELTA_MASK packets.** Mixed spans of changed and unchanged pixels are represented by a bitmask. The encoder compares the complete byte cost against ordinary SKIP plus data packets and emits the mask only when it is smaller.
-3. **Per-frame compression portfolio.** For each frame the encoder tests eight zlib/DEFLATE configurations (levels 1, 3, 6, 9 and four level-9 strategies) and LZ4-HC levels 1, 6, 9 and 12. Raw payload is also a candidate. The winner is selected by actual stored size, including the four-byte decoded-size prefix; compressed data is used only when it is strictly smaller than raw. All candidates use existing CPV compression flags, so no format version bump is needed.
+2. **Compression-aware DELTA_MASK packets.** For P-frames the encoder builds three alternatives: no masks, the original per-chunk byte-size heuristic, and masks for every eligible mixed span. It compares complete packet streams using a level-12 libdeflate zlib-size probe (including the four-byte uncompressed-size prefix), then runs the full compression portfolio only for the selected packetisation. This lets a locally larger mask survive when it produces a smaller compressed frame, without multiplying the full portfolio cost across every alternative.
+3. **Per-frame compression portfolio.** For each frame the encoder tests eight zlib/DEFLATE configurations (levels 1, 3, 6, 9 and four level-9 strategies), LZ4-HC levels 1, 6, 9 and 12, and libdeflate zlib levels 6, 9, 10 and 12. Raw payload is also a candidate. The winner is selected by actual stored size, including the four-byte decoded-size prefix; compressed data is used only when it is strictly smaller than raw. libdeflate uses the standard zlib wrapper, so all candidates use existing CPV compression flags and no format version bump is needed.
 4. **Global motion prediction (v1.3).** The encoder searches for a whole-frame translation of up to eight pixels in either axis. It encodes and compresses both ordinary and motion-predicted P-frames, retaining motion only when the complete stored frame is smaller.
 
 ### Palette quality
@@ -107,12 +107,12 @@ Higher values mean stronger and more lossy filtering, not higher visual fidelity
 - --fit contain|stretch: preserve aspect ratio with letterboxing (default) or stretch to exact dimensions.
 - --background RRGGBB: letterbox colour (default 000000).
 - --no-global-motion: disable motion analysis and prediction.
-- --no-delta-mask: disable mixed SKIP/data masks.
+- --no-delta-mask: disable all DELTA_MASK packetisation trials.
 - --no-frame-compression or --no-lz4: disable LZ4-HC and DEFLATE.
 - --ffmpeg PATH, --ffprobe PATH: select external FFmpeg executables.
 - --self-test: run native packet, bit-packing, palette and motion tests.
 
-Run tools/cpv_convert --help for the full command-line help. The converter reports the palette size, frame counts, keyframes, duration, compression codec counts and winning candidate per frame, compression and motion savings, total file size, conversion time and packet sizes by type.
+Run tools/cpv_convert --help for the full command-line help. The converter reports the palette size, frame counts, keyframes, duration, compression codec counts and winning candidate per frame, DELTA_MASK packetisation winners, compression and motion savings, total file size, conversion time and packet sizes by type.
 
 ## Play a CPV file on the host
 

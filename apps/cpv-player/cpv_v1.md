@@ -582,7 +582,7 @@ Mask bits are least-significant-bit first. A set bit means that pixel is changed
 
 DELTA_MASK MUST contain at least one set bit and at least one clear bit; all-clear and all-set spans MUST use ordinary SKIP or data packets. DELTA_MASK is valid only in P-frames. It cannot contain RAW565 pixels; the encoder MUST split out direct-colour pixels into ordinary RAW565 packets. A decoder MUST reject a zero span, a span that exceeds the remaining frame pixels, truncated mask or index data, invalid palette indices, non-zero padding bits, and any DELTA_MASK in an I-frame.
 
-The encoder SHOULD compare the complete encoded size of the mask form against the ordinary sequence of SKIP and data packets, including all headers. It MUST emit DELTA_MASK only when the mask form is strictly smaller. This avoids adding overhead to simple motion or contiguous changed regions.
+The encoder SHOULD compare complete frame representations with and without candidate DELTA_MASK packets. When frame compression is enabled, this comparison SHOULD include the selected compression method and the four-byte uncompressed-size prefix; a mask packet may be larger before compression yet reduce the complete stored frame size. When compression is disabled, compare the complete uncompressed packet streams. An encoder SHOULD retain a mask packetisation only when its complete representation is smaller than the corresponding no-mask representation.
 
 The sentinel is invalid as an ordinary long SKIP length (ordinary long packet lengths are 33–8,191). It is therefore unambiguous for a v1.1 decoder. A v1.0 decoder rejects it as an invalid packet length.
 
@@ -1187,7 +1187,7 @@ tools/cpv_convert input.mp4 \
     --preprocess-quality 35
 ```
 
-The repository's reference host encoder is implemented in native C++17. Build it with `make -C tools`. It uses FFmpeg/FFprobe for media decoding and palette generation, zlib for DEFLATE, and LZ4 for optional LZ4-HC compression.
+The repository's reference host encoder is implemented in native C++17. Build it with `make -C tools`. It uses FFmpeg/FFprobe for media decoding and palette generation, zlib and libdeflate for zlib-wrapped DEFLATE, and LZ4 for optional LZ4-HC compression. libdeflate streams use the existing DEFLATE frame flag and do not require a decoder change.
 
 Recommended options:
 

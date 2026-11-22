@@ -22,7 +22,7 @@ jobs:
       - name: Install native and host dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg zlib1g-dev liblz4-dev python3-tk
+          sudo apt-get install -y ffmpeg zlib1g-dev liblz4-dev libdeflate-dev python3-tk
           python -m pip install --upgrade pip
           python -m pip install numpy lz4
       - name: Build native encoder

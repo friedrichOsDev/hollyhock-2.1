@@ -13,6 +13,7 @@
 #include <filesystem>
 #include <iostream>
 #include <limits>
+#include <memory>
 #include <numeric>
 #include <sstream>
 #include <stdexcept>
@@ -25,6 +26,7 @@
 #include <vector>
 #include <zlib.h>
 #include <lz4hc.h>
+#include <libdeflate.h>
 
 namespace fs = std::filesystem;
 
@@ -43,6 +45,8 @@ static constexpr uint8_t OP_REPEAT = 1;
 static constexpr uint8_t OP_SKIP = 2;
 static constexpr uint8_t OP_RAW565 = 3;
 static constexpr uint8_t OP_MASK = 4;
+
+enum class MaskPolicy : uint8_t { Disabled = 0, Heuristic = 1, Force = 2 };
 static constexpr std::array<const char *, 5> OP_NAMES = {
     "INDEX_LITERAL", "INDEX_REPEAT", "SKIP", "RAW565", "DELTA_MASK"
 };
@@ -277,7 +281,7 @@ static void print_help() {
         "  --fit contain|stretch        Preserve aspect ratio or stretch (default contain)\n"
         "  --background RRGGBB         Letterbox colour (default 000000)\n"
         "  --no-global-motion           Disable v1.3 motion trials\n"
-        "  --no-delta-mask              Disable mixed SKIP/data masks\n"
+        "  --no-delta-mask              Disable compression-aware DELTA_MASK trials\n"
         "  --no-frame-compression       Disable LZ4-HC/DEFLATE\n"
         "  --no-lz4                     Alias for --no-frame-compression\n"
         "  --ffmpeg PATH                FFmpeg executable (default ffmpeg)\n"
@@ -713,7 +717,7 @@ static void encode_palette_delta(
     const std::vector<uint16_t> &reconstructed,
     const std::vector<uint16_t> &previous,
     size_t start, size_t length, PacketStats &stats,
-    uint8_t bits, bool allow_mask
+    uint8_t bits, MaskPolicy mask_policy
 ) {
     for (size_t chunk = 0; chunk < length;) {
         size_t n = std::min<size_t>(MAX_MASK_SPAN, length - chunk);
@@ -728,7 +732,7 @@ static void encode_palette_delta(
         PacketStats normal_stats;
         encode_normal_delta(normal, indices, reconstructed, previous,
                             absolute, n, normal_stats, bits);
-        if (allow_mask && changed_count > 0 && changed_count < n) {
+        if (mask_policy != MaskPolicy::Disabled && changed_count > 0 && changed_count < n) {
             std::vector<uint8_t> candidate;
             candidate.reserve(4 + (n+7)/8 + (changed_count*bits+7)/8);
             candidate.push_back(0xA0);
@@ -741,7 +745,7 @@ static void encode_palette_delta(
             for (size_t i = 0; i < n; ++i)
                 if (changed[i]) changed_indices.push_back(indices[absolute+i]);
             pack_indices(candidate, changed_indices, 0, changed_indices.size(), bits);
-            if (candidate.size() < normal.size()) {
+            if (mask_policy == MaskPolicy::Force || candidate.size() < normal.size()) {
                 stats.add(OP_MASK, candidate.size());
                 out.insert(out.end(), candidate.begin(), candidate.end());
             } else {
@@ -766,7 +770,7 @@ static EncodedFrame encode_frame(
     const std::vector<uint16_t> *previous,
     uint8_t frame_type,
     uint8_t bits,
-    bool allow_mask
+    MaskPolicy mask_policy
 ) {
     EncodedFrame result;
     const size_t count = frame.reconstructed.size();
@@ -787,7 +791,7 @@ static EncodedFrame encode_frame(
             emit_raw(result.payload, frame.reconstructed, pos, end-pos, result.stats);
         } else if (frame_type == FRAME_P) {
             encode_palette_delta(result.payload, frame.indices, frame.reconstructed,
-                *previous, pos, end-pos, result.stats, bits, allow_mask);
+                *previous, pos, end-pos, result.stats, bits, mask_policy);
         } else {
             encode_palette_segment(result.payload, frame.indices, pos, end-pos,
                                    result.stats, bits);
@@ -800,7 +804,7 @@ static EncodedFrame encode_frame(
 struct CompressionResult {
     std::vector<uint8_t> bytes;
     uint8_t flag = 0;
-    uint8_t variant = 0; // 0 raw, 1-8 DEFLATE candidates, 9-12 LZ4-HC levels
+    uint8_t variant = 0; // 0 raw, 1-8 zlib, 9-12 LZ4-HC, 13-16 libdeflate/zlib
     uint64_t saved = 0;
 };
 
@@ -828,6 +832,25 @@ static std::vector<uint8_t> deflate_candidate(
     deflateEnd(&stream);
     if (status != Z_STREAM_END)
         throw std::runtime_error("zlib DEFLATE compression failed");
+    output.resize(written);
+    return output;
+}
+
+static std::vector<uint8_t> libdeflate_zlib_candidate(
+    const std::vector<uint8_t> &payload, int level
+) {
+    libdeflate_compressor *raw_compressor = libdeflate_alloc_compressor(level);
+    if (!raw_compressor)
+        throw std::runtime_error("libdeflate compressor allocation failed");
+    std::unique_ptr<libdeflate_compressor, decltype(&libdeflate_free_compressor)> compressor(
+        raw_compressor, &libdeflate_free_compressor);
+    const size_t bound = libdeflate_zlib_compress_bound(compressor.get(), payload.size());
+    if (!bound || bound == std::numeric_limits<size_t>::max())
+        throw std::runtime_error("libdeflate returned an invalid compression bound");
+    std::vector<uint8_t> output(bound);
+    const size_t written = libdeflate_zlib_compress(
+        compressor.get(), payload.data(), payload.size(), output.data(), output.size());
+    if (!written) throw std::runtime_error("libdeflate zlib compression failed");
     output.resize(written);
     return output;
 }
@@ -891,8 +914,65 @@ static CompressionResult compress_payload(const std::vector<uint8_t> &payload, b
         }
     }
 
+    // libdeflate supports levels through 12 and emits standard zlib wrappers.
+    static constexpr std::array<int, 4> LIBDEFLATE_LEVELS = {{6, 9, 10, 12}};
+    for (size_t i = 0; i < LIBDEFLATE_LEVELS.size(); ++i)
+        consider(libdeflate_zlib_candidate(payload, LIBDEFLATE_LEVELS[i]),
+                 FLAG_DEFLATE, static_cast<uint8_t>(13 + i));
+
     result.saved = payload.size() - result.bytes.size();
     return result;
+}
+
+static size_t compression_probe_size(const std::vector<uint8_t> &payload, bool enabled) {
+    if (!enabled || payload.empty()) return payload.size();
+    const std::vector<uint8_t> compressed = libdeflate_zlib_candidate(payload, 12);
+    const size_t stored_size = compressed.size() + 4;
+    return std::min(payload.size(), stored_size);
+}
+
+struct PreparedFrame {
+    EncodedFrame encoded;
+    CompressionResult compressed;
+    MaskPolicy mask_policy = MaskPolicy::Disabled;
+};
+
+static PreparedFrame prepare_frame(
+    const MappedFrame &frame,
+    const std::vector<uint16_t> *previous,
+    uint8_t frame_type,
+    uint8_t bits,
+    bool allow_mask,
+    bool compression_enabled,
+    const uint8_t *prefix = nullptr,
+    size_t prefix_size = 0
+) {
+    PreparedFrame best;
+    size_t best_probe = std::numeric_limits<size_t>::max();
+    std::vector<uint8_t> best_stream;
+    const std::array<MaskPolicy, 3> policies = {{
+        MaskPolicy::Disabled, MaskPolicy::Heuristic, MaskPolicy::Force
+    }};
+    const size_t policy_count = (frame_type == FRAME_P && allow_mask) ? policies.size() : 1;
+
+    for (size_t i = 0; i < policy_count; ++i) {
+        const MaskPolicy policy = policies[i];
+        EncodedFrame candidate = encode_frame(frame, previous, frame_type, bits, policy);
+        std::vector<uint8_t> stream;
+        stream.reserve(prefix_size + candidate.payload.size());
+        if (prefix_size) stream.insert(stream.end(), prefix, prefix + prefix_size);
+        stream.insert(stream.end(), candidate.payload.begin(), candidate.payload.end());
+        const size_t probe = compression_probe_size(stream, compression_enabled);
+        if (probe < best_probe) {
+            best_probe = probe;
+            best.encoded = std::move(candidate);
+            best.mask_policy = policy;
+            best_stream = std::move(stream);
+        }
+    }
+
+    best.compressed = compress_payload(best_stream, compression_enabled);
+    return best;
 }
 
 static size_t motion_matches(
@@ -1072,6 +1152,13 @@ static void run_self_tests() {
     std::vector<uint8_t> compress_test(32768);
     for (size_t i=0;i<compress_test.size();++i)
         compress_test[i]=static_cast<uint8_t>((i/64 + (i%13)) & 0xFF);
+    const std::vector<uint8_t> libdeflate_test=libdeflate_zlib_candidate(compress_test,12);
+    std::vector<uint8_t> libdeflate_roundtrip(compress_test.size());
+    uLongf libdeflate_roundtrip_size=static_cast<uLongf>(libdeflate_roundtrip.size());
+    if (uncompress(libdeflate_roundtrip.data(),&libdeflate_roundtrip_size,
+                   libdeflate_test.data(),static_cast<uLong>(libdeflate_test.size()))!=Z_OK ||
+        libdeflate_roundtrip_size!=compress_test.size() || libdeflate_roundtrip!=compress_test)
+        throw std::runtime_error("libdeflate zlib compatibility self-test failed");
     CompressionResult compression_test=compress_payload(compress_test,true);
     if (compression_test.flag==0 || compression_test.bytes.size()>=compress_test.size() ||
         compression_test.saved!=compress_test.size()-compression_test.bytes.size() ||
@@ -1168,7 +1255,8 @@ static void convert_video(const Options &o) {
         std::vector<std::array<uint32_t,3>> keyframes;
         PacketStats total_stats;
         uint64_t lz4_frames=0,deflate_frames=0,compression_saved=0;
-        std::array<uint64_t,13> compression_winners{};
+        std::array<uint64_t,17> compression_winners{};
+        std::array<uint64_t,3> mask_policy_winners{};
         uint64_t motion_frames=0,motion_saved=0;
         const uint32_t key_interval=std::max<uint32_t>(1,static_cast<uint32_t>(std::llround(o.keyframe_interval*1000.0)));
         const uint16_t fill=rgb565_round(
@@ -1197,9 +1285,12 @@ static void convert_video(const Options &o) {
             } else {
                 bool keyframe=!have_previous || !have_keyframe || start-last_keyframe_start>=key_interval;
                 uint8_t type=keyframe?FRAME_I:FRAME_P;
-                EncodedFrame encoded=encode_frame(mapped,have_previous?&previous:nullptr,
-                    type,bits,!o.no_delta_mask);
-                CompressionResult compressed=compress_payload(encoded.payload,!o.no_compression);
+                PreparedFrame prepared=prepare_frame(
+                    mapped,have_previous?&previous:nullptr,type,bits,
+                    !o.no_delta_mask,!o.no_compression);
+                EncodedFrame encoded=std::move(prepared.encoded);
+                CompressionResult compressed=std::move(prepared.compressed);
+                MaskPolicy selected_mask_policy=prepared.mask_policy;
                 std::vector<uint8_t> stored=std::move(compressed.bytes);
                 uint8_t flags=compressed.flag;
                 uint64_t frame_saving=compressed.saved;
@@ -1210,25 +1301,24 @@ static void convert_video(const Options &o) {
                     int dx=motion.first,dy=motion.second;
                     if(dx||dy) {
                         std::vector<uint16_t> predicted=shift_frame(previous,o.width,o.height,dx,dy,fill);
-                        EncodedFrame motion_packets=encode_frame(mapped,&predicted,
-                            FRAME_P,bits,!o.no_delta_mask);
-                        std::vector<uint8_t> motion_stream;
-                        motion_stream.reserve(4+motion_packets.payload.size());
-                        motion_stream.push_back(static_cast<uint8_t>(static_cast<int8_t>(dx)));
-                        motion_stream.push_back(static_cast<uint8_t>(static_cast<int8_t>(dy)));
-                        motion_stream.push_back(static_cast<uint8_t>(fill));
-                        motion_stream.push_back(static_cast<uint8_t>(fill>>8));
-                        motion_stream.insert(motion_stream.end(),motion_packets.payload.begin(),motion_packets.payload.end());
-                        CompressionResult motion_compressed=compress_payload(motion_stream,!o.no_compression);
-                        if(motion_compressed.bytes.size()<stored.size()) {
-                            motion_saved+=stored.size()-motion_compressed.bytes.size();
+                        const uint8_t motion_header[4] = {
+                            static_cast<uint8_t>(static_cast<int8_t>(dx)),
+                            static_cast<uint8_t>(static_cast<int8_t>(dy)),
+                            static_cast<uint8_t>(fill), static_cast<uint8_t>(fill>>8)
+                        };
+                        PreparedFrame motion_prepared=prepare_frame(
+                            mapped,&predicted,FRAME_P,bits,!o.no_delta_mask,
+                            !o.no_compression,motion_header,sizeof(motion_header));
+                        if(motion_prepared.compressed.bytes.size()<stored.size()) {
+                            motion_saved+=stored.size()-motion_prepared.compressed.bytes.size();
                             ++motion_frames;
-                            stored=std::move(motion_compressed.bytes);
-                            flags=static_cast<uint8_t>(motion_compressed.flag|FLAG_MOTION);
-                            frame_saving=motion_compressed.saved;
-                            compressed.flag=motion_compressed.flag;
-                            compressed.variant=motion_compressed.variant;
-                            encoded.stats=std::move(motion_packets.stats);
+                            stored=std::move(motion_prepared.compressed.bytes);
+                            flags=static_cast<uint8_t>(motion_prepared.compressed.flag|FLAG_MOTION);
+                            frame_saving=motion_prepared.compressed.saved;
+                            compressed.flag=motion_prepared.compressed.flag;
+                            compressed.variant=motion_prepared.compressed.variant;
+                            encoded.stats=std::move(motion_prepared.encoded.stats);
+                            selected_mask_policy=motion_prepared.mask_policy;
                         }
                     }
                 }
@@ -1236,6 +1326,7 @@ static void convert_video(const Options &o) {
                 else if(compressed.flag==FLAG_DEFLATE) ++deflate_frames;
                 compression_saved+=frame_saving;
                 ++compression_winners[compressed.variant];
+                ++mask_policy_winners[static_cast<size_t>(selected_mask_policy)];
 
                 uint64_t offset=write_frame_record(file,stored,type,flags,stored_count,duration);
                 if(type==FRAME_I) {
@@ -1325,7 +1416,12 @@ static void convert_video(const Options &o) {
             << ", L9 filtered=" << compression_winners[5] << ", L9 Huffman-only=" << compression_winners[6]
             << ", L9 RLE=" << compression_winners[7] << ", L9 fixed=" << compression_winners[8]
             << ", LZ4-HC L1=" << compression_winners[9] << ", L6=" << compression_winners[10]
-            << ", L9=" << compression_winners[11] << ", L12=" << compression_winners[12] << "\n"
+            << ", L9=" << compression_winners[11] << ", L12=" << compression_winners[12]
+            << ", libdeflate L6=" << compression_winners[13] << ", L9=" << compression_winners[14]
+            << ", L10=" << compression_winners[15] << ", L12=" << compression_winners[16] << "\n"
+            << "  DELTA_MASK packetisation: disabled=" << mask_policy_winners[0]
+            << ", local-size heuristic=" << mask_policy_winners[1]
+            << ", compressed-size probe=" << mask_policy_winners[2] << "\n"
             << "  Global-motion frames: " << motion_frames << "/" << stored_count << "\n"
             << "  Bytes saved by global motion: " << motion_saved << "\n"
             << "  File size: " << size << " bytes (" << size/(1024.0*1024.0) << " MiB)\n"
