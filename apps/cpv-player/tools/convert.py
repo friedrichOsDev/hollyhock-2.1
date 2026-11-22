@@ -188,9 +188,8 @@ def make_filter(
     background: str,
     preprocess_quality: int = 0,
 ) -> str:
-    # Scale before denoising to keep the filter inexpensive. Denoising happens
-    # before frame-rate reduction so temporal filtering sees the source cadence.
-    filters = []
+    # Match the legacy order: reduce to the target cadence, scale, then denoise.
+    filters = [f"fps={fps.numerator}/{fps.denominator}"]
     if fit == "stretch":
         filters.append(f"scale={width}:{height}:flags=lanczos")
     else:
@@ -203,7 +202,6 @@ def make_filter(
     if denoise_filter is not None:
         filters.append(denoise_filter)
 
-    filters.append(f"fps={fps.numerator}/{fps.denominator}")
     filters.append("setsar=1")
     return ",".join(filters)
 
@@ -393,19 +391,21 @@ def build_global_palette(
     fit: str,
     background: str,
     palette_quality: int,
-    preprocess_quality: int,
     fps: Fraction,
     temp_dir: Path,
 ):
-    """Use the original 6x6 seed image as a real FFmpeg palette-generation input."""
+    """Use the original seed image with FPS-reduced, scaled but un-denoised video."""
+
     require_numpy()
     palette_budget = palette_limit_for_palette_quality(palette_quality)
     seed_palette = build_legacy_seed_palette()
     seed_rgb24 = build_legacy_seed_rgb24()
     palette_path = temp_dir / "palette.png"
 
+    # The legacy palette generator used the source without hqdn3d; denoising
+    # is applied later to the video frames before palette mapping.
     video_filter = make_filter(
-        width, height, fps, fit, background, preprocess_quality
+        width, height, fps, fit, background, 0
     )
     filter_graph = (
         f"[0:v]{video_filter}[video];"
@@ -953,7 +953,7 @@ def convert(args: argparse.Namespace) -> None:
         with tempfile.TemporaryDirectory(prefix="cpv_palette_") as palette_dir:
             palette, palette_limit = build_global_palette(
                 ffmpeg, source, args.width, args.height, args.fit,
-                args.background, args.palette_quality, args.preprocess_quality,
+                args.background, args.palette_quality,
                 fps, Path(palette_dir),
             )
             lookup = build_rgb565_lookup(palette)
