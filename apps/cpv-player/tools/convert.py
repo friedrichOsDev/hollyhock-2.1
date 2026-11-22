@@ -728,28 +728,27 @@ def encode_frame_payload(indices, reconstructed, raw_mask, previous,
 
 
 def compress_frame_payload(payload: bytes, enabled: bool) -> tuple[bytes, int, int]:
-    """Choose the smaller independent LZ4-HC or DEFLATE/Huffman frame stream."""
+    """Choose the smaller independent LZ4-HC or DEFLATE frame stream."""
     if not enabled:
         return payload, 0, 0
-    require_lz4()
 
-    decoded_size_prefix = struct.pack("<I", len(payload))
-    lz4_data = lz4_block.compress(
-        payload, mode="high_compression", compression=9, store_size=False
-    )
-    lz4_stored = decoded_size_prefix + lz4_data
-    deflate_stored = decoded_size_prefix + zlib.compress(payload, level=9)
+    prefix = struct.pack("<I", len(payload))
+    candidates: list[tuple[int, bytes, int]] = [
+        (len(prefix) + len(zlib.compress(payload, level=9)), prefix + zlib.compress(payload, level=9), FRAME_FLAG_DEFLATE)
+    ]
+    if lz4_block is not None:
+        lz4_data = lz4_block.compress(
+            payload, mode="high_compression", compression=9, store_size=False
+        )
+        lz4_stored = prefix + lz4_data
+        candidates.append((len(lz4_stored), lz4_stored, FRAME_FLAG_LZ4))
 
-    candidates = (
-        (len(lz4_stored), lz4_stored, FRAME_FLAG_LZ4),
-        (len(deflate_stored), deflate_stored, FRAME_FLAG_DEFLATE),
-    )
-    _, stored, selected_flag = min(candidates, key=lambda item: item[0])
+    _, stored, flag = min(candidates, key=lambda item: item[0])
     saving = len(payload) - len(stored)
-    minimum_saving = max(16, len(payload) // 100)
-    if saving < minimum_saving:
+    if saving < max(16, len(payload) // 100):
         return payload, 0, 0
-    return stored, selected_flag, saving
+    return stored, flag, saving
+
 
 def read_exact(stream: BinaryIO, size: int) -> Optional[bytes]:
     chunks = bytearray()
@@ -798,8 +797,8 @@ def write_frame_record(
 
 def convert(args: argparse.Namespace) -> None:
     require_numpy()
-    if not args.no_frame_compression:
-        require_lz4()
+    if not args.no_frame_compression and lz4_block is None:
+        print("Notice: python-lz4 is not installed; DEFLATE will be used where beneficial.")
     source = Path(args.input).expanduser().resolve()
     output_path = Path(args.output).expanduser().resolve()
     if not source.is_file():
