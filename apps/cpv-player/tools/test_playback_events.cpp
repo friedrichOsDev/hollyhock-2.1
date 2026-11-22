@@ -1,4 +1,5 @@
 #include "../cpv_playback_events.hpp"
+#include "../cpv_playback_clock.hpp"
 
 #include <stdio.h>
 

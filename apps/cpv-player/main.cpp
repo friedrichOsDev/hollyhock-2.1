@@ -18,6 +18,12 @@ static const uint32_t kMaxFramesPerTimerEvent = 64U;
 static const char *kCalibrationFolder = "CPVCAL";
 static const char *kCalibrationVariable = "TIMER";
 
+static bool g_repeatPlayback = false;
+static bool g_showControls = true;
+static bool g_debugMode = false;
+static uint32_t g_timerCalibrationEvents = 0;
+static uint32_t g_timerCalibrationSeconds = kCalibrationSeconds;
+
 void AppendNumber(uint32_t value, char *out, unsigned capacity) {
     if (!out || capacity == 0)
         return;
@@ -710,11 +716,6 @@ void PlayVideo(UI::Application &app, const char *path,
         DrawError("CPV DECODE ERROR", playbackError);
 }
 
-static bool g_repeatPlayback = false;
-static bool g_showControls = true;
-static bool g_debugMode = false;
-static uint32_t g_timerCalibrationEvents = 0;
-static uint32_t g_timerCalibrationSeconds = kCalibrationSeconds;
 
 void CPVFileSelected(UI::Application &app, const char *path) {
     if (g_timerCalibrationEvents == 0) {
