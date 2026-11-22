@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate, decode, and preview CPV v1.2 global-palette video files."""
+"""Validate, decode, and preview CPV v1.3 global-palette video files."""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ except ImportError:
 
 MAGIC = b"CPV\0"
 VERSION_MAJOR = 1
-VERSION_MINOR = 2
+VERSION_MINOR = 3
 
 HEADER = struct.Struct("<4sBBHIHHHHIHHIIII20s")
 FRAME_HEADER = struct.Struct("<4sBBHIII")
@@ -38,7 +38,11 @@ MAX_FPS = 30
 MAX_RUN_LENGTH = 8191
 FRAME_FLAG_LZ4 = 0x01
 FRAME_FLAG_DEFLATE = 0x02
-FRAME_FLAGS_MASK = FRAME_FLAG_LZ4 | FRAME_FLAG_DEFLATE
+FRAME_FLAG_GLOBAL_MOTION = 0x04
+FRAME_COMPRESSION_MASK = FRAME_FLAG_LZ4 | FRAME_FLAG_DEFLATE
+FRAME_FLAGS_MASK = FRAME_COMPRESSION_MASK | FRAME_FLAG_GLOBAL_MOTION
+MAX_GLOBAL_MOTION = 8
+MOTION_HEADER = struct.Struct("<bbH")
 
 FRAME_I = 0
 FRAME_P = 1
@@ -134,9 +138,9 @@ class CPVFile:
 
         if magic != MAGIC:
             raise CPVError("invalid magic; expected CPV\\0")
-        if major != VERSION_MAJOR or minor not in (0, 1, VERSION_MINOR):
+        if major != VERSION_MAJOR or minor not in (0, 1, 2, VERSION_MINOR):
             raise CPVError(
-                f"unsupported CPV version {major}.{minor}; this player supports 1.0, 1.1 and 1.2"
+                f"unsupported CPV version {major}.{minor}; this player supports 1.0, 1.1, 1.2 and 1.3"
             )
         self.version_minor = minor
         self.index_bits = 8 if minor == 0 else max(1, (self.palette_count - 1).bit_length())
@@ -214,10 +218,15 @@ class CPVFile:
                 raise CPVError(f"frame {number} has invalid magic; expected FRM1")
             if frame_type not in (FRAME_I, FRAME_P):
                 raise CPVError(f"frame {number} has unknown type {frame_type}")
-            if frame_flags & ~FRAME_FLAGS_MASK or frame_flags == FRAME_FLAGS_MASK:
+            compression_flags = frame_flags & FRAME_COMPRESSION_MASK
+            if frame_flags & ~FRAME_FLAGS_MASK or compression_flags == FRAME_COMPRESSION_MASK:
                 raise CPVError(f"frame {number} has invalid flag bits 0x{frame_flags:02x}")
             if minor < 2 and frame_flags & FRAME_FLAG_DEFLATE:
-                raise CPVError(f"frame {number}: DEFLATE flag is only supported in CPV 1.2")
+                raise CPVError(f"frame {number}: DEFLATE flag is only supported in CPV 1.2 or newer")
+            if minor < 3 and frame_flags & FRAME_FLAG_GLOBAL_MOTION:
+                raise CPVError(f"frame {number}: global motion requires CPV 1.3")
+            if frame_flags & FRAME_FLAG_GLOBAL_MOTION and frame_type != FRAME_P:
+                raise CPVError(f"frame {number}: global motion is valid only in P-frames")
             if minor == 0 and frame_flags != 0:
                 raise CPVError(f"CPV 1.0 frame {number} must have zero flags")
             if frame_header_size != FRAME_HEADER.size:
@@ -286,11 +295,13 @@ class CPVFile:
 
     def _read_payload(self, record: FrameRecord) -> bytes:
         pixel_count = self.width * self.height
-        max_decoded_size = pixel_count * 3
-        if record.flags & (FRAME_FLAG_LZ4 | FRAME_FLAG_DEFLATE):
+        motion_prefix_size = MOTION_HEADER.size if record.flags & FRAME_FLAG_GLOBAL_MOTION else 0
+        max_decoded_size = pixel_count * 3 + motion_prefix_size
+        compression_flags = record.flags & FRAME_COMPRESSION_MASK
+        if compression_flags:
             if self.version_minor < 1:
                 raise CPVError(f"frame {record.number}: compression flags are invalid in CPV 1.0")
-            if record.flags == FRAME_FLAG_DEFLATE and self.version_minor < 2:
+            if compression_flags == FRAME_FLAG_DEFLATE and self.version_minor < 2:
                 raise CPVError(f"frame {record.number}: DEFLATE is invalid in CPV 1.1")
             if record.payload_size < 5:
                 raise CPVError(f"frame {record.number}: truncated compressed payload")
@@ -305,14 +316,14 @@ class CPVFile:
             if record.payload_size - 4 >= decoded_size:
                 raise CPVError(f"frame {record.number}: compressed payload is not smaller than raw payload")
             try:
-                if record.flags == FRAME_FLAG_LZ4:
+                if compression_flags == FRAME_FLAG_LZ4:
                     if lz4_block is None:
                         raise CPVError(
                             "this video uses LZ4; install python-lz4 "
                             "(Arch/CachyOS: sudo pacman -S python-lz4)"
                         )
                     decoded = lz4_block.decompress(stored[4:], uncompressed_size=decoded_size)
-                elif record.flags == FRAME_FLAG_DEFLATE:
+                elif compression_flags == FRAME_FLAG_DEFLATE:
                     import zlib
                     decoder = zlib.decompressobj()
                     decoded = decoder.decompress(stored[4:], decoded_size + 1)
@@ -413,6 +424,32 @@ class CPVFile:
         payload_bytes = self._read_payload(record)
         payload = memoryview(payload_bytes)
         payload_position = 0
+        if record.flags & FRAME_FLAG_GLOBAL_MOTION:
+            if record.frame_type != FRAME_P or self.version_minor < 3:
+                raise CPVError(f"frame {frame_number}: invalid global-motion flag")
+            if len(payload) < MOTION_HEADER.size:
+                raise CPVError(f"frame {frame_number}: truncated global-motion header")
+            dx, dy, fill_colour = MOTION_HEADER.unpack_from(payload, 0)
+            if (
+                (dx == 0 and dy == 0)
+                or abs(dx) > MAX_GLOBAL_MOTION
+                or abs(dy) > MAX_GLOBAL_MOTION
+            ):
+                raise CPVError(f"frame {frame_number}: invalid global-motion vector ({dx}, {dy})")
+            source = framebuffer.reshape(self.height, self.width)
+            shifted = np.full(
+                (self.height, self.width), fill_colour, dtype=np.uint16
+            )
+            source_x0 = max(0, -dx)
+            source_y0 = max(0, -dy)
+            source_x1 = min(self.width, self.width - dx)
+            source_y1 = min(self.height, self.height - dy)
+            shifted[
+                source_y0 + dy:source_y1 + dy,
+                source_x0 + dx:source_x1 + dx,
+            ] = source[source_y0:source_y1, source_x0:source_x1]
+            framebuffer[:] = shifted.reshape(-1)
+            payload_position = MOTION_HEADER.size
         pixel_position = 0
         pixel_count = self.width * self.height
 
