@@ -33,6 +33,18 @@ jobs:
         run: |
           python -m py_compile apps/cpv-player/tools/play.py apps/cpv-player/tools/test_encoder.py apps/cpv-player/tools/benchmark_quality.py
           python -m unittest discover -s apps/cpv-player/tools -p 'test_*.py' -v
+      - name: Quality benchmark end-to-end smoke test
+        run: |
+          ffmpeg -hide_banner -loglevel error -y \
+            -f lavfi -i testsrc2=size=64x48:rate=5:duration=2 \
+            -c:v mpeg4 -q:v 3 /tmp/cpv-quality-source.mp4
+          python3 apps/cpv-player/tools/benchmark_quality.py \
+            /tmp/cpv-quality-source.mp4 \
+            --output-dir /tmp/cpv-quality-benchmark \
+            --width 32 --height 24 --fps 5
+          test "$(find /tmp/cpv-quality-benchmark -maxdepth 1 -name '*.cpv' | wc -l)" -eq 9
+          test -s /tmp/cpv-quality-benchmark/summary.csv
+          test -s /tmp/cpv-quality-benchmark/manifest.json
       - name: Calculator global-motion helper test
         run: |
           g++ -std=c++11 -Wall -Wextra -Werror \
