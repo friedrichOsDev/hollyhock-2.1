@@ -254,46 +254,85 @@ bool IsCalibrationConfirm(const UI::Event &event) {
     return event.type==UI::EventKey && event.keyAction==UI::KeyPressed &&
            event.keyCode==UI::KeyEXE;
 }
-void EncodeCalibration(uint32_t count, uint8_t seconds, uint8_t data[16]) {
-    data[0]='T'; data[1]='C'; data[2]='A'; data[3]='L';
-    data[4]=1; data[5]=seconds;
-    for(unsigned i=0;i<4;++i) data[6+i]=static_cast<uint8_t>(count>>(i*8U));
-    const uint32_t inverse=~count;
-    for(unsigned i=0;i<4;++i) data[10+i]=static_cast<uint8_t>(inverse>>(i*8U));
-    data[14]=0; data[15]=0;
+void AppendDecimalField(uint8_t *data, unsigned &position,
+                        uint32_t value) {
+    char digits[12];
+    AppendNumber(value, digits, sizeof(digits));
+    for (unsigned i = 0; digits[i]; ++i)
+        data[position++] = static_cast<uint8_t>(digits[i]);
+    data[position++] = ';';
 }
-bool DecodeCalibration(const uint8_t data[16], uint8_t seconds,
-                       uint32_t *count) {
-    if(!data || !count || data[0]!='T' || data[1]!='C' ||
-       data[2]!='A' || data[3]!='L' || data[4]!=1 || data[5]!=seconds)
+bool ReadDecimalField(const uint8_t *data, unsigned &position,
+                      uint8_t terminator, uint32_t *value) {
+    if (!data || !value || data[position] < '0' || data[position] > '9')
         return false;
-    uint32_t events=0, inverse=0;
-    for(unsigned i=0;i<4;++i) {
-        events |= static_cast<uint32_t>(data[6+i])<<(i*8U);
-        inverse |= static_cast<uint32_t>(data[10+i])<<(i*8U);
+    uint32_t parsed = 0;
+    while (data[position] >= '0' && data[position] <= '9') {
+        const uint32_t digit = data[position] - '0';
+        if (parsed > (0xFFFFFFFFU - digit) / 10U)
+            return false;
+        parsed = parsed * 10U + digit;
+        ++position;
     }
-    if(!events || inverse!=~events) return false;
-    *count=events; return true;
+    if (data[position] != terminator)
+        return false;
+    ++position;
+    *value = parsed;
+    return true;
+}
+void EncodeCalibration(uint32_t count, uint8_t seconds, uint8_t data[32]) {
+    for (unsigned i = 0; i < 32U; ++i) data[i] = 0;
+    data[0]='T'; data[1]='C'; data[2]='A'; data[3]='L'; data[4]='1';
+    unsigned position = 5;
+    data[position++] = ';';
+    AppendDecimalField(data, position, seconds);
+    AppendDecimalField(data, position, count);
+    AppendDecimalField(data, position, ~count);
+    data[position] = 0;
+}
+bool DecodeCalibration(const uint8_t data[32], uint8_t seconds,
+                       uint32_t *count) {
+    if (!data || !count || data[0]!='T' || data[1]!='C' ||
+        data[2]!='A' || data[3]!='L' || data[4]!='1' || data[5]!=';')
+        return false;
+    unsigned position = 6;
+    uint32_t storedSeconds = 0, events = 0, inverse = 0;
+    if (!ReadDecimalField(data, position, ';', &storedSeconds) ||
+        !ReadDecimalField(data, position, ';', &events) ||
+        !ReadDecimalField(data, position, 0, &inverse) ||
+        storedSeconds != seconds || events == 0 || events > 10000U ||
+        inverse != ~events)
+        return false;
+    *count = events;
+    return true;
 }
 bool LoadTimerCalibration() {
     UI::PersistentStore store;
-    if(store.Open(kCalibrationFolder)!=0) return false;
-    uint8_t type=0, data[16]; uint32_t size=0;
-    if(store.Load(kCalibrationVariable,&type,data,sizeof(data),&size)!=0 ||
-       type!=VARTYPE_STR || size<sizeof(data)) return false;
-    uint32_t events=0;
-    if(!DecodeCalibration(data,static_cast<uint8_t>(kCalibrationSeconds),&events))
+    if (store.Open(kCalibrationFolder) != 0) return false;
+    uint8_t type = 0;
+    uint8_t data[32] = {0};
+    uint32_t size = 0;
+    if (store.Load(kCalibrationVariable, &type, data,
+                   sizeof(data), &size) != 0 ||
+        type != VARTYPE_STR || size < 16U || size > sizeof(data))
         return false;
-    g_timerCalibrationEvents=events;
-    g_timerCalibrationSeconds=kCalibrationSeconds;
+    uint32_t events = 0;
+    if (!DecodeCalibration(data,
+                           static_cast<uint8_t>(kCalibrationSeconds), &events))
+        return false;
+    g_timerCalibrationEvents = events;
+    g_timerCalibrationSeconds = kCalibrationSeconds;
     return true;
 }
 bool SaveTimerCalibration(uint32_t count) {
     UI::PersistentStore store;
-    if(store.Open(kCalibrationFolder)!=0) return false;
-    uint8_t data[16];
-    EncodeCalibration(count,static_cast<uint8_t>(kCalibrationSeconds),data);
-    return store.Save(kCalibrationVariable,VARTYPE_STR,data,sizeof(data))==0;
+    if (store.Open(kCalibrationFolder) != 0) return false;
+    uint8_t data[32];
+    EncodeCalibration(count, static_cast<uint8_t>(kCalibrationSeconds), data);
+    unsigned size = 0;
+    while (size < sizeof(data) && data[size]) ++size;
+    if (size >= sizeof(data)) return false;
+    return store.Save(kCalibrationVariable, VARTYPE_STR, data, size + 1U) == 0;
 }
 void WaitForCalibrationResult(UI::Framebuffer &screen, bool saved,
                               uint32_t count) {
@@ -348,10 +387,10 @@ void CalibrateTimer(UI::Application &) {
             finished=true;
         }
     }
-    if(!count) {
-        DrawCalibrationScreen(screen,false,0,false,"NO TIMER EVENTS - CALIBRATION FAILED");
-        WaitForCalibrationResult(screen,false,0);
-        screen.End(); return;
+    if (!count || count > 10000U) {
+        WaitForCalibrationResult(screen, false, 0);
+        screen.End();
+        return;
     }
     g_timerCalibrationEvents=count;
     g_timerCalibrationSeconds=kCalibrationSeconds;
@@ -718,6 +757,8 @@ void PlayVideo(UI::Application &app, const char *path,
 
 
 void CPVFileSelected(UI::Application &app, const char *path) {
+    if (g_timerCalibrationEvents == 0)
+        LoadTimerCalibration();
     if (g_timerCalibrationEvents == 0) {
         DrawError("CALIBRATION REQUIRED", "Open Settings and run Calibrate timer");
         return;
@@ -729,7 +770,6 @@ void CPVFileSelected(UI::Application &app, const char *path) {
 } // namespace
 
 extern "C" void main() {
-    LoadTimerCalibration();
     UI::Config config;
     config.title = "CPV Player";
     config.settingsFolder = "CPVPL";

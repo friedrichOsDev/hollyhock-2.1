@@ -8,7 +8,8 @@ public:
         m_eventBudget(0), m_credit(0), m_frameCost(0),
         m_configured(false), m_frameActive(false) {}
     bool Configure(uint32_t timerEvents, uint32_t measurementSeconds) {
-        if (!timerEvents || !measurementSeconds || measurementSeconds > 60U)
+        if (!timerEvents || timerEvents > 10000U ||
+            !measurementSeconds || measurementSeconds > 60U)
             return false;
         m_timerEvents=timerEvents; m_measurementSeconds=measurementSeconds;
         m_eventBudget=measurementSeconds*1000U; m_credit=0; m_frameCost=0;
