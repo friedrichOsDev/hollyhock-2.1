@@ -56,7 +56,7 @@ if (screen.Begin()) {
 
 Drawing requires an active framebuffer. Methods return false for an inactive framebuffer or invalid dimensions/pointers; a valid rectangle that lies entirely outside the display is a successful no-op. Pixel writes outside the display are skipped. Rectangles are clipped to the visible area. DrawLine() accepts endpoints only in the range -16383 to 16383 on each axis; it rasterizes the bounded line and writes only pixels that lie inside the LCD. It does not allocate a temporary image or use a floating-point clipping step.
 
-Drawing modifies VRAM immediately. Present() calls LCD_Refresh(); it does not copy from a second buffer.
+Drawing modifies VRAM immediately. BlitRGB565() copies a caller-owned RGB565 raster directly into VRAM, supports integer nearest-neighbour scaling, clips at the LCD edges, and performs no allocation. Source dimensions must be within 1..528 by 1..320; scale must be 1..64. Present() calls LCD_Refresh(); it does not copy from a second buffer.
 
 ## Built-in font
 

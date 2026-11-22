@@ -100,6 +100,28 @@ int main() {
           !screen.SetPixel(8, 0, UI::Colors::Black),
           "SetPixel rejects out-of-bounds coordinates");
 
+    const uint16_t image[4] = {
+        UI::Colors::Red, UI::Colors::Green,
+        UI::Colors::Blue, UI::Colors::White
+    };
+    screen.Clear(UI::Colors::Black);
+    Check(screen.BlitRGB565(1, 1, image, 2, 2, 2),
+          "BlitRGB565 copies a scaled source image");
+    Check(VisiblePixels()[1 * 8 + 1] == UI::Colors::Red &&
+          VisiblePixels()[1 * 8 + 2] == UI::Colors::Red &&
+          VisiblePixels()[2 * 8 + 1] == UI::Colors::Red &&
+          VisiblePixels()[2 * 8 + 2] == UI::Colors::Red &&
+          VisiblePixels()[1 * 8 + 3] == UI::Colors::Green &&
+          VisiblePixels()[3 * 8 + 1] == UI::Colors::Blue &&
+          VisiblePixels()[3 * 8 + 3] == UI::Colors::White,
+          "BlitRGB565 scales and lays out pixels in row-major order");
+    Check(screen.BlitRGB565(-1, -1, image, 2, 2, 2),
+          "BlitRGB565 clips images at the LCD edges");
+    Check(!screen.BlitRGB565(0, 0, image, 0, 2, 1) &&
+          !screen.BlitRGB565(0, 0, image, 2, 2, 0) &&
+          !screen.BlitRGB565(0, 0, 0, 2, 2, 1),
+          "BlitRGB565 rejects invalid source dimensions and scale");
+
     screen.Clear(UI::Colors::Black);
     Check(screen.FillRect(-2, -1, 4, 3, UI::Colors::Green),
           "FillRect clips a partially visible rectangle");

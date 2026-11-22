@@ -104,13 +104,15 @@ public:
     bool FillRect(int x, int y, int width, int height, Color color);
     bool DrawRect(int x, int y, int width, int height, Color color);
     bool DrawLine(int x1, int y1, int x2, int y2, Color color);
+    bool BlitRGB565(int x, int y, const uint16_t *source,
+                    int sourceWidth, int sourceHeight, int scale = 1);
     bool DrawChar(int x, int y, char character, Color color);
     bool DrawText(int x, int y, const char *text, Color color);
     bool Present();
 };
 ~~~
 
-Framebuffer is non-copyable. It attaches to LCD VRAM and does not allocate a second buffer. Drawing modifies VRAM; Present() refreshes the display. Colors are RGB565. UI::Colors provides standard colors. The built-in 5x7 font supports printable ASCII 32-126; lowercase letters are drawn using uppercase glyphs. DrawText() handles newline, carriage return, and tab, and processes at most 512 input bytes.
+Framebuffer is non-copyable. It attaches to LCD VRAM and does not allocate a second buffer. Drawing modifies VRAM; Present() refreshes the display. BlitRGB565() copies a caller-owned image of at most 528×320 RGB565 pixels directly to VRAM, optionally replicating each source pixel by an integer scale from 1 to 64; destination writes are clipped to the LCD. It allocates no memory. Colors are RGB565. UI::Colors provides standard colors. The built-in 5x7 font supports printable ASCII 32-126; lowercase letters are drawn using uppercase glyphs. DrawText() handles newline, carriage return, and tab, and processes at most 512 input bytes.
 
 ## Input
 

@@ -1,6 +1,32 @@
 # CPV Player
 
-The host-side CPV v1.3 encoder is implemented in native C++; tools/play.py is the validated Python reference decoder and desktop preview player. The current Casio application is still a file-selector prototype: its selection callback does not yet decode or display video. The calculator-side playback loop, storage reader, decompressor, packet decoder, and display path remain to be implemented.
+The host-side CPV v1.3 encoder is implemented in native C++; tools/play.py is the validated Python reference decoder and desktop preview player. The Casio application now includes a streaming CPV v1.3 decoder and a UI-Library-based playback screen. It supports I/P frames, bit-packed INDEX_LITERAL, INDEX_REPEAT, SKIP, DELTA_MASK, RAW565, LZ4, zlib/DEFLATE, global-motion prediction, and keyframe seeking. The player uses a separate RGB565 reference surface and scales frames through the UI Library framebuffer. Hardware playback and timing still require verification on a real fx-CP400.
+
+## Calculator player
+
+The calculator app uses the UI Library for the framebuffer-backed main menu, `.cpv` file selector, persistent settings and calculator lifecycle. Select **Play video** and choose a CPV file from `fls0`. The decoder validates the file header, palette, frame records, frame flags, packet bounds and keyframe index before playback.
+
+The calculator decoder streams frame payloads from the file; it does not load the complete video into RAM. The current implementation accepts files up to 2 GiB (the SDK file-seek API uses signed offsets) and at most 65,535 indexed I-frames to keep its index allocation bounded. It holds a 256-entry RGB565 palette, the keyframe index, a bounded stored/decompressed frame buffer and one persistent RGB565 reference image. For the selected 100×60 profile, the reference image itself occupies only 12,000 bytes. The reference image is kept separate from LCD VRAM so that the UI overlay cannot contaminate SKIP/DELTA_MASK reconstruction.
+
+Playback controls: **EXE** pauses/resumes, **Left/Right** seek by 5 seconds, **Up/Down** seek by 20 seconds, and **Backspace/Power-Clear** or the action-bar Escape event exits playback. Settings let you repeat the video and show/hide the HUD. Touching the left/right third seeks by 5 seconds; touching the middle third pauses/resumes (or restarts after the end).
+
+**Timing limitation:** this SDK version exposes non-blocking input polling but no public monotonic clock or sleep function. The current player uses an uncalibrated busy-wait constant as a temporary pacing approximation. Frame timing, performance and the constant must be measured and adjusted on the actual calculator; accurate timing should ultimately use a timer service in the SDK/UI Library.
+
+The UI Library framebuffer includes `BlitRGB565()` for bounded RGB565 image transfer and integer nearest-neighbour scaling. It avoids per-pixel calls through the public API and does not allocate a second destination image.
+
+Build the calculator application with the SH-4 toolchain:
+
+~~~sh
+apps/cpv-player/build.sh
+~~~
+
+or, after building the SDK and UI Library:
+
+~~~sh
+make -C apps/cpv-player SDK_DIR=../../sdk UI_DIR=../../ui all
+~~~
+
+Copy `apps/cpv-player/cpv_player.hhk` to `fls0` and start it from Hollyhock 2.1. (The cross-toolchain build and real-device playback must still be checked on the target setup.)
 
 ## Host encoder requirements
 

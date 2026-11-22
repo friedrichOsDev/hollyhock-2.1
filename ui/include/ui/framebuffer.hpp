@@ -51,6 +51,10 @@ public:
     bool DrawRect(int x, int y, int width, int height, Color color);
     bool DrawLine(int x1, int y1, int x2, int y2, Color color);
 
+    // Copy a bounded RGB565 image into VRAM with integer nearest-neighbour scaling.
+    bool BlitRGB565(int x, int y, const uint16_t *source,
+                    int sourceWidth, int sourceHeight, int scale = 1);
+
     // Uses a built-in 5x7 bitmap font with a one-pixel character gap.
     // Lowercase ASCII letters are rendered using their uppercase glyph.
     // Newline starts a new line; tab advances by four character cells.
