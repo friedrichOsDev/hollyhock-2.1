@@ -87,8 +87,19 @@ Decoder::Decoder()
       m_decodedBuffer(0),
       m_pixels(0),
       m_open(false),
-      m_hasFrame(false) {
+      m_hasFrame(false),
+      m_debugOperation("IDLE"),
+      m_lastReadBytes(0),
+      m_lastStoredFrameBytes(0),
+      m_lastDecodedFrameBytes(0),
+      m_lastPacketCount(0),
+      m_lastSeekFrames(0),
+      m_lastCompression(0),
+      m_debugCallback(0),
+      m_debugContext(0) {
     m_error[0] = 0;
+    for (unsigned i = 0; i < 5; ++i)
+        m_lastPacketTypes[i] = 0;
     for (unsigned i = 0; i < 256; ++i)
         m_palette[i] = 0;
 }
@@ -101,11 +112,41 @@ void Decoder::SetError(const char *message) {
     CopyError(m_error, message);
 }
 
+void Decoder::SetOperation(const char *operation) {
+    m_debugOperation = operation ? operation : "UNKNOWN";
+    NotifyDebug(0, 0);
+}
+
+void Decoder::NotifyDebug(uint32_t current, uint32_t total) {
+    if (m_debugCallback)
+        m_debugCallback(m_debugContext, m_debugOperation, current, total);
+}
+
+void Decoder::SetDebugCallback(DebugCallback callback, void *context) {
+    m_debugCallback = callback;
+    m_debugContext = context;
+}
+
 const char *Decoder::Error() const {
     return m_error[0] ? m_error : "Unknown CPV error";
 }
 
+const char *Decoder::LastOperation() const {
+    return m_debugOperation ? m_debugOperation : "UNKNOWN";
+}
+
+uint32_t Decoder::LastReadBytes() const { return m_lastReadBytes; }
+uint32_t Decoder::LastStoredFrameBytes() const { return m_lastStoredFrameBytes; }
+uint32_t Decoder::LastDecodedFrameBytes() const { return m_lastDecodedFrameBytes; }
+uint32_t Decoder::LastPacketCount() const { return m_lastPacketCount; }
+uint32_t Decoder::PacketCount(uint8_t opcode) const {
+    return opcode < 5 ? m_lastPacketTypes[opcode] : 0;
+}
+uint32_t Decoder::LastSeekFrames() const { return m_lastSeekFrames; }
+uint8_t Decoder::LastCompression() const { return m_lastCompression; }
+
 bool Decoder::ReadAt(uint32_t offset, void *buffer, uint32_t size) {
+    m_lastReadBytes = 0;
     if (!m_file.IsOpen() || (!buffer && size) ||
         offset > m_fileSize || size > m_fileSize - offset ||
         offset > 0x7FFFFFFFU || size > 0x7FFFFFFFU) {
@@ -128,7 +169,10 @@ bool Decoder::ReadAt(uint32_t offset, void *buffer, uint32_t size) {
             return false;
         }
         destination += received;
+        m_lastReadBytes += static_cast<uint32_t>(received);
         remaining -= static_cast<uint32_t>(received);
+        if (size >= 512U)
+            NotifyDebug(m_lastReadBytes, size);
     }
     return true;
 }
@@ -155,6 +199,7 @@ void Decoder::Close() {
 bool Decoder::Open(const char *path) {
     Close();
     m_error[0] = 0;
+    SetOperation("OPEN FILE");
 
     if (m_file.Open(path) < 0) {
         SetError("Cannot open CPV file");
@@ -169,6 +214,7 @@ bool Decoder::Open(const char *path) {
         return false;
     }
 
+    SetOperation("READ FILE HEADER");
     uint8_t header[kFileHeaderSize];
     if (!ReadAt(0, header, sizeof(header))) {
         Close();
@@ -249,6 +295,7 @@ bool Decoder::Open(const char *path) {
         return false;
     }
 
+    SetOperation("READ PALETTE");
     uint8_t paletteBytes[512];
     if (!ReadAt(paletteOffset, paletteBytes,
                 static_cast<uint32_t>(m_paletteCount) * 2U)) {
@@ -266,6 +313,7 @@ bool Decoder::Open(const char *path) {
         }
     }
 
+    SetOperation("ALLOCATE BUFFERS");
     m_storedBuffer = static_cast<uint8_t *>(malloc(m_storedCapacity));
     m_decodedBuffer = static_cast<uint8_t *>(malloc(m_streamCapacity));
     m_pixels = static_cast<uint16_t *>(
@@ -290,6 +338,7 @@ bool Decoder::Open(const char *path) {
     m_currentFrame = 0xFFFFFFFFU;
     m_frameDurationMs = 0;
     m_hasFrame = false;
+    SetOperation("READY");
     return true;
 }
 
@@ -316,6 +365,7 @@ bool Decoder::ReadFrameHeader(uint32_t offset, FrameHeader *header) {
 }
 
 bool Decoder::ValidateFile() {
+    SetOperation("VALIDATE INDEX");
     uint8_t indexHeader[kIndexHeaderSize];
     if (!ReadAt(m_indexOffset, indexHeader, sizeof(indexHeader)))
         return false;
@@ -351,7 +401,10 @@ bool Decoder::ValidateFile() {
     uint32_t lastKeyTime = 0;
     uint32_t expectedKeys = 0;
 
+    SetOperation("SCAN FRAME HEADERS");
     for (uint32_t number = 0; number < m_frameCount; ++number) {
+        if ((number & 0x0FU) == 0)
+            NotifyDebug(number, m_frameCount);
         if (position > m_indexOffset ||
             kFrameHeaderSize > m_indexOffset - position) {
             SetError("Frame header overlaps keyframe index");
@@ -432,7 +485,10 @@ bool Decoder::ValidateFile() {
     uint32_t previousNumber = 0;
     uint32_t previousTime = 0;
     uint32_t previousOffset = 0;
+    SetOperation("READ KEYFRAME INDEX");
     for (uint32_t i = 0; i < indexCount; ++i) {
+        if ((i & 0x0FU) == 0)
+            NotifyDebug(i, indexCount);
         uint8_t entryBytes[kIndexEntrySize];
         const uint32_t offset = m_indexOffset + kIndexHeaderSize +
                                 i * kIndexEntrySize;
@@ -464,6 +520,7 @@ bool Decoder::ValidateFile() {
         SetError("The first keyframe index entry is invalid");
         return false;
     }
+    SetOperation("VALIDATION COMPLETE");
     return true;
 }
 
@@ -508,10 +565,18 @@ bool Decoder::ValidatePackedPadding(const uint8_t *data, uint32_t dataSize,
 }
 
 bool Decoder::DecodeFrameAt(uint32_t offset, const FrameHeader &header) {
+    SetOperation("READ FRAME PAYLOAD");
+    m_lastStoredFrameBytes = 0;
+    m_lastDecodedFrameBytes = 0;
+    m_lastPacketCount = 0;
+    m_lastCompression = header.flags & kFrameCompressionMask;
+    for (unsigned i = 0; i < 5; ++i)
+        m_lastPacketTypes[i] = 0;
     if (header.payloadSize > m_storedCapacity ||
         !ReadAt(offset + kFrameHeaderSize, m_storedBuffer,
                 header.payloadSize))
         return false;
+    m_lastStoredFrameBytes = header.payloadSize;
 
     const uint8_t compression = header.flags & kFrameCompressionMask;
     const uint8_t *payload = m_storedBuffer;
@@ -534,10 +599,12 @@ bool Decoder::DecodeFrameAt(uint32_t offset, const FrameHeader &header) {
 
         bool decoded = false;
         if (compression == kFrameFlagDeflate) {
+            SetOperation("INFLATE DEFLATE");
             decoded = InflateZlib(payload + 4, payloadSize - 4,
                                   m_decodedBuffer, m_streamCapacity,
                                   decodedSize);
         } else if (compression == kFrameFlagLZ4) {
+            SetOperation("DECOMPRESS LZ4");
             decoded = DecompressLZ4Block(payload + 4, payloadSize - 4,
                                          m_decodedBuffer, m_streamCapacity,
                                          decodedSize);
@@ -548,13 +615,18 @@ bool Decoder::DecodeFrameAt(uint32_t offset, const FrameHeader &header) {
         }
         payload = m_decodedBuffer;
         payloadSize = decodedSize;
+        m_lastDecodedFrameBytes = decodedSize;
     } else if (payloadSize > m_streamCapacity) {
         SetError("Uncompressed frame exceeds the safety limit");
         return false;
     }
 
+    if (m_lastDecodedFrameBytes == 0)
+        m_lastDecodedFrameBytes = payloadSize;
+
     uint32_t packetOffset = 0;
     if (header.flags & kFrameFlagGlobalMotion) {
+        SetOperation("APPLY GLOBAL MOTION");
         if (header.type != kFrameP || payloadSize < 4U) {
             SetError("Invalid or truncated global-motion header");
             return false;
@@ -579,6 +651,7 @@ bool Decoder::DecodeFrameAt(uint32_t offset, const FrameHeader &header) {
         packetOffset = 4;
     }
 
+    SetOperation("DECODE PACKETS");
     if (!DecodePackets(payload + packetOffset,
                        payloadSize - packetOffset, header))
         return false;
@@ -589,11 +662,16 @@ bool Decoder::DecodeFrameAt(uint32_t offset, const FrameHeader &header) {
     m_currentFrame = header.number;
     m_nextOffset = offset + kFrameHeaderSize + header.payloadSize;
     m_hasFrame = true;
+    SetOperation("FRAME COMPLETE");
     return true;
 }
 
 bool Decoder::DecodePackets(const uint8_t *payload, uint32_t payloadSize,
                             const FrameHeader &header) {
+    SetOperation("DECODE PACKETS");
+    m_lastPacketCount = 0;
+    for (unsigned i = 0; i < 5; ++i)
+        m_lastPacketTypes[i] = 0;
     uint32_t position = 0;
     uint32_t pixelPosition = 0;
 
@@ -637,6 +715,9 @@ bool Decoder::DecodePackets(const uint8_t *payload, uint32_t payloadSize,
                 return false;
             }
         }
+
+        ++m_lastPacketCount;
+        ++m_lastPacketTypes[deltaMask ? 4U : opcode];
 
         if (runLength > m_pixelCount - pixelPosition) {
             SetError("Packet extends beyond the frame");
@@ -751,6 +832,8 @@ bool Decoder::DecodePackets(const uint8_t *payload, uint32_t payloadSize,
         }
 
         pixelPosition += runLength;
+        if ((m_lastPacketCount & 0x3FU) == 0)
+            NotifyDebug(pixelPosition, m_pixelCount);
     }
 
     if (pixelPosition != m_pixelCount || position != payloadSize) {
@@ -761,6 +844,7 @@ bool Decoder::DecodePackets(const uint8_t *payload, uint32_t payloadSize,
 }
 
 bool Decoder::DecodeNext() {
+    SetOperation("DECODE NEXT FRAME");
     if (!m_open || AtEnd())
         return false;
 
@@ -777,6 +861,8 @@ bool Decoder::DecodeNext() {
 }
 
 bool Decoder::Seek(uint32_t targetMs) {
+    SetOperation("FIND KEYFRAME");
+    m_lastSeekFrames = 0;
     if (!m_open || m_keyframeCount == 0)
         return false;
     if (targetMs >= m_totalDurationMs)
@@ -799,9 +885,14 @@ bool Decoder::Seek(uint32_t targetMs) {
     m_hasFrame = false;
 
     while (DecodeNext()) {
+        ++m_lastSeekFrames;
+        m_debugOperation = "SEEK DECODED FRAME";
+        NotifyDebug(m_lastSeekFrames, m_frameCount);
         if (targetMs >= m_frameStartMs &&
-            targetMs - m_frameStartMs < m_frameDurationMs)
+            targetMs - m_frameStartMs < m_frameDurationMs) {
+            SetOperation("SEEK COMPLETE");
             return true;
+        }
     }
     SetError("Unable to decode the requested seek position");
     return false;

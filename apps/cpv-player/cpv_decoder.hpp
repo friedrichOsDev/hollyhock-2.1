@@ -6,6 +6,9 @@
 
 namespace CPV {
 
+typedef void (*DebugCallback)(void *context, const char *operation,
+                              uint32_t current, uint32_t total);
+
 struct KeyframeEntry {
     uint32_t frameNumber;
     uint32_t timeMs;
@@ -21,6 +24,7 @@ public:
     Decoder &operator=(const Decoder &) = delete;
 
     bool Open(const char *path);
+    void SetDebugCallback(DebugCallback callback, void *context);
     void Close();
 
     // Decode the next stored frame. The first successful call decodes frame 0.
@@ -46,6 +50,16 @@ public:
     uint32_t CurrentFrameDurationMs() const;
     const uint16_t *Pixels() const;
     const char *Error() const;
+
+    // Last-stage diagnostics for the calculator's text debug view.
+    const char *LastOperation() const;
+    uint32_t LastReadBytes() const;
+    uint32_t LastStoredFrameBytes() const;
+    uint32_t LastDecodedFrameBytes() const;
+    uint32_t LastPacketCount() const;
+    uint32_t PacketCount(uint8_t opcode) const;
+    uint32_t LastSeekFrames() const;
+    uint8_t LastCompression() const;
 
 private:
     struct FrameHeader {
@@ -87,6 +101,18 @@ private:
 
     bool m_open;
     bool m_hasFrame;
+
+    const char *m_debugOperation;
+    uint32_t m_lastReadBytes;
+    uint32_t m_lastStoredFrameBytes;
+    uint32_t m_lastDecodedFrameBytes;
+    uint32_t m_lastPacketCount;
+    uint32_t m_lastPacketTypes[5];
+    uint32_t m_lastSeekFrames;
+    uint8_t m_lastCompression;
+    DebugCallback m_debugCallback;
+    void *m_debugContext;
+
     char m_error[128];
 
     bool ReadAt(uint32_t offset, void *buffer, uint32_t size);
@@ -100,6 +126,8 @@ private:
     bool ValidatePackedPadding(const uint8_t *data, uint32_t dataSize,
                                uint32_t count) const;
     void SetError(const char *message);
+    void SetOperation(const char *operation);
+    void NotifyDebug(uint32_t current, uint32_t total);
 };
 
 } // namespace CPV
