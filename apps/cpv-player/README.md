@@ -97,9 +97,10 @@ The first 36 palette entries always use the legacy seed order. Palette quality 1
 | 1–25 | Very mild denoising |
 | 26–50 | Mild to moderate denoising |
 | 51–75 | Stronger spatial and temporal denoising |
-| 76–100 | Strong denoising; fine details may be lost |
+| 76–99 | Stronger denoising; fine details may be lost |
+| 100 | Exact legacy FFmpeg hqdn3d default (4:3:6:4.5) |
 
-Higher pre-process values mean stronger, more lossy filtering, not higher visual fidelity. Denoising can reduce sensor noise and small frame-to-frame changes, which may improve delta and LZ4 compression. It can also remove texture and fine detail, so compare the output visually. Start around 20–40 for noisy footage; use 0 for clean animation, UI recordings, or other sharp material.
+Higher pre-process values mean stronger, more lossy filtering, not higher visual fidelity. Value 100 reproduces the old tool's default hqdn3d strength (luma spatial 4, chroma spatial 3, luma temporal 6, chroma temporal 4.5). Denoising can reduce sensor noise and small frame-to-frame changes, which may improve delta and LZ4 compression. It can also remove texture and fine detail, so compare the output visually. Start around 20–40 for noisy footage; use 0 for clean animation, UI recordings, or other sharp material.
 
 Example for a moderately denoised source with a high colour budget:
 
