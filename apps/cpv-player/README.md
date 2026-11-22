@@ -118,7 +118,7 @@ Use `--palette-quality` to trade colour accuracy for a smaller palette, and `--p
 
 ### Additional options
 
-- `--keyframe-interval SECONDS`: target interval between I-frames; default 2 seconds, maximum 10 seconds.
+- `--keyframe-interval SECONDS`: target interval between I-frames; default 2 seconds, maximum 10 seconds. Use `10` for smaller files; seeking then needs to decode more dependent frames.
 - `--fit contain`: preserve aspect ratio with letterboxing (default).
 - `--fit stretch`: stretch the image to the exact output dimensions.
 - `--background RRGGBB`: letterbox background colour (default `000000`).
