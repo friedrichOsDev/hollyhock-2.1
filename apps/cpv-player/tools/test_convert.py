@@ -32,6 +32,13 @@ class PaletteTests(unittest.TestCase):
             with self.subTest(quality=quality):
                 self.assertEqual(convert.palette_limit_for_palette_quality(quality), expected)
 
+    def test_preprocess_100_matches_legacy_hqdn3d_defaults(self):
+        self.assertEqual(
+            convert.hqdn3d_filter(100),
+            "hqdn3d=4.00:3.00:6.00:4.50",
+        )
+        self.assertIsNone(convert.hqdn3d_filter(0))
+
     def test_legacy_seed_palette_is_exact_and_first(self):
         import numpy as np
         seed_rgb = convert.build_legacy_seed_rgb24()
