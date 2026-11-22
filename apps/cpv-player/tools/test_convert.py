@@ -8,6 +8,8 @@ from __future__ import annotations
 import importlib.util
 import sys
 import unittest
+import subprocess
+import tempfile
 from pathlib import Path
 
 TOOLS = Path(__file__).resolve().parent
@@ -15,6 +17,11 @@ SPEC = importlib.util.spec_from_file_location("cpv_convert", TOOLS / "convert.py
 convert = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = convert
 SPEC.loader.exec_module(convert)
+
+PLAY_SPEC = importlib.util.spec_from_file_location("cpv_play", TOOLS / "play.py")
+play = importlib.util.module_from_spec(PLAY_SPEC)
+sys.modules[PLAY_SPEC.name] = play
+PLAY_SPEC.loader.exec_module(play)
 
 
 class PaletteTests(unittest.TestCase):
@@ -70,6 +77,48 @@ class PackingTests(unittest.TestCase):
             decoded = zlib.decompress(stored[4:])
         self.assertEqual(decoded_size, len(payload))
         self.assertEqual(decoded, payload)
+
+
+class IntegrationTests(unittest.TestCase):
+    def test_short_video_encode_decode_round_trip(self):
+        import numpy as np
+        import shutil
+        if shutil.which("ffmpeg") is None:
+            self.skipTest("FFmpeg is not installed")
+        with tempfile.TemporaryDirectory(prefix="cpv_test_") as temp:
+            root = Path(temp)
+            source = root / "source.mp4"
+            output = root / "test.cpv"
+            subprocess.run(
+                [
+                    "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+                    "-f", "lavfi", "-i", "testsrc2=size=64x48:rate=5:duration=2",
+                    "-c:v", "mpeg4", "-q:v", "3", str(source),
+                ],
+                check=True,
+            )
+            subprocess.run(
+                [
+                    sys.executable, str(TOOLS / "convert.py"), str(source),
+                    "--output", str(output), "--width", "32", "--height", "24",
+                    "--fps", "5", "--palette-quality", "10",
+                    "--preprocess-quality", "0", "--keyframe-interval", "1",
+                    "--background", "000000",
+                ],
+                check=True,
+            )
+            cpv = play.CPVFile(output)
+            try:
+                self.assertGreaterEqual(cpv.palette_count, 8)
+                self.assertEqual(cpv.palette[:8].tolist(), list(convert.FIXED_BASE_PALETTE))
+                framebuffer = np.zeros(cpv.width * cpv.height, dtype=np.uint16)
+                for frame_number in range(cpv.frame_count):
+                    cpv.decode_frame(frame_number, framebuffer)
+                    self.assertEqual(framebuffer.size, cpv.width * cpv.height)
+                    self.assertTrue(np.all(framebuffer <= 0xFFFF))
+                self.assertGreater(cpv.frame_count, 1)
+            finally:
+                cpv.close()
 
 
 if __name__ == "__main__":
