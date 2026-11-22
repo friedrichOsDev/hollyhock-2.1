@@ -43,6 +43,50 @@ void AppendNumber(uint32_t value, char *out, unsigned capacity) {
     out[position] = 0;
 }
 
+struct PlaybackState {
+    bool paused;
+    bool ended;
+    bool exit;
+    bool redraw;
+    bool touchLatched;
+    uint16_t latchedKey;
+    uint32_t remainingMs;
+    uint32_t timerEventCount;
+    const char *lastInput;
+    const char *phase;
+    uint32_t workCurrent;
+    uint32_t workTotal;
+    uint16_t lastRawType;
+    uint16_t lastKeyCode;
+    uint32_t lastRawAction;
+    int32_t lastTouchX;
+    int32_t lastTouchY;
+
+    PlaybackState()
+        : paused(false), ended(false), exit(false), redraw(true),
+          touchLatched(false), latchedKey(0), remainingMs(0),
+          timerEventCount(0), lastInput("START"), phase("START"),
+          workCurrent(0), workTotal(0), lastRawType(0), lastKeyCode(0),
+          lastRawAction(0), lastTouchX(0), lastTouchY(0) {}
+};
+
+struct DebugContext {
+    UI::Framebuffer *screen;
+    CPV::Decoder *decoder;
+    PlaybackState *state;
+};
+
+int DividePositive(int dividend, int divisor) {
+    if (dividend <= 0 || divisor <= 0)
+        return 0;
+    int quotient = 0;
+    while (dividend >= divisor) {
+        dividend -= divisor;
+        ++quotient;
+    }
+    return quotient;
+}
+
 unsigned TextLength(const char *text) {
     unsigned length = 0;
     if (text) {
