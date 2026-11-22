@@ -32,7 +32,7 @@ MAGIC = b"CPV\0"
 VERSION_MAJOR = 1
 VERSION_MINOR = 3
 
-# CPV v1.1: 64-byte file header, 20-byte frame header, 12-byte index entry.
+# CPV v1.3: 64-byte file header, 20-byte frame header, 12-byte index entry.
 HEADER = struct.Struct("<4sBBHIHHHHIHHIIII20s")
 FRAME_HEADER = struct.Struct("<4sBBHIII")
 INDEX_HEADER = struct.Struct("<4sI")
