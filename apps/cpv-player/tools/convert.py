@@ -332,7 +332,7 @@ def build_global_palette(
     )
     video_filter = (
         sample_filter
-        + f",palettegen=max_colors={max_colours}:stats_mode=full:reserve_transparent=0"
+        + f",palettegen=max_colors={max(2, max_colours - len(FIXED_BASE_PALETTE))}:stats_mode=full:reserve_transparent=0"
     )
     command = [
         ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
@@ -1058,12 +1058,13 @@ def convert(args: argparse.Namespace) -> None:
             f"  Stored frames: {stored_frame_count}\n"
             f"  Keyframes: {len(index_entries)}\n"
             f"  Duration: {seconds:.3f} s\n"
-            f"  Palette: {palette.size} colours (hybrid video anchors + generated colours)\n"
+            f"  Palette: {palette.size} colours (8 fixed primary colours + adaptive video colours)\n"
             f"  Palette quality: {args.palette_quality}/100\n"
             f"  Pre-process quality: {args.preprocess_quality}/100\n"
             f"  Palette index width: {bits_per_index(int(palette.size))} bits\n"
-            f"  LZ4-compressed frames: {total_compressed_frames}/{stored_frame_count}\n"
-            f"  LZ4 bytes saved: {total_lz4_savings:,}\n"
+            f"  LZ4-HC frames: {total_lz4_frames}/{stored_frame_count}\n"
+            f"  DEFLATE/Huffman frames: {total_deflate_frames}/{stored_frame_count}\n"
+            f"  Compression bytes saved: {total_compression_savings:,}\n"
             f"  File size: {size:,} bytes ({size / (1024 * 1024):.2f} MiB)\n"
             f"  Conversion time: {elapsed_wall:.2f} s\n"
             f"  Conversion speed: {seconds / elapsed_wall:.2f}× realtime\n"
