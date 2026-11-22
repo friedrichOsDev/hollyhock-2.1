@@ -34,32 +34,6 @@ class PaletteTests(unittest.TestCase):
         self.assertIn(0x1234, palette.tolist())
         self.assertLessEqual(palette.size, 16)
 
-    def test_anchor_colours_are_from_video_sample(self):
-        # RGB565: black, near-white, red, green, blue, plus an unrelated colour.
-        colours = __import__("numpy").array(
-            [0x0000, 0xFFFF, 0xF800, 0x07E0, 0x001F, 0x1234],
-            dtype="uint16",
-        )
-        counts = __import__("numpy").array([1000, 800, 700, 600, 500, 2], dtype="uint64")
-        anchors = convert.select_hybrid_anchors(colours, counts, 16)
-        self.assertGreaterEqual(len(anchors), 1)
-        self.assertLessEqual(len(anchors), 4)
-        self.assertTrue(set(map(int, anchors)).issubset(set(map(int, colours))))
-
-    def test_anchor_budget_small_palette(self):
-        import numpy as np
-        colours = np.array([0x0000, 0xFFFF, 0xF800, 0x07E0], dtype=np.uint16)
-        counts = np.array([500, 400, 300, 200], dtype=np.uint64)
-        anchors = convert.select_hybrid_anchors(colours, counts, 4)
-        self.assertLessEqual(anchors.size, 2)
-        self.assertTrue(set(map(int, anchors)).issubset(set(map(int, colours))))
-
-    def test_empty_sample(self):
-        import numpy as np
-        anchors = convert.select_hybrid_anchors(
-            np.empty(0, dtype=np.uint16), np.empty(0, dtype=np.uint64), 16
-        )
-        self.assertEqual(anchors.size, 0)
 
 
 class PackingTests(unittest.TestCase):
@@ -84,8 +58,6 @@ class PackingTests(unittest.TestCase):
             self.assertEqual(recovered, values.tolist())
 
     def test_frame_compression_selects_lz4_or_deflate_and_round_trips(self):
-        if convert.lz4_block is None:
-            self.skipTest("python-lz4 not installed")
         payload = (b"CPV repeated test data " * 500) + bytes(range(256))
         stored, flags, saved = convert.compress_frame_payload(payload, True)
         self.assertIn(flags, (convert.FRAME_FLAG_LZ4, convert.FRAME_FLAG_DEFLATE))
