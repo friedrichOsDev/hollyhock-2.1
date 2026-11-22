@@ -1,6 +1,6 @@
 # CPV Video Format Specification
 
-**Document:** CPV v1.1  
+**Document:** CPV v1.2  
 **File extension:** `.cpv`  
 **Status:** Proposed specification — implementation baseline  
 **Target platform:** Casio fx-CP400 running Hollyhock 2.1  
@@ -253,7 +253,7 @@ The file header is exactly **64 bytes**.
 |---:|---|---|---:|---|
 | 0 | `magic` | char[4] | 4 | ASCII `CPV\0` |
 | 4 | `version_major` | uint8 | 1 | 1 |
-| 5 | `version_minor` | uint8 | 1 | 1 for CPV v1.1; v1.0 readers MAY also be supported |
+| 5 | `version_minor` | uint8 | 1 | 2 for CPV v1.2; v1.0/v1.1 readers MAY also be supported |
 | 6 | `header_size` | uint16 | 2 | 64 |
 | 8 | `flags` | uint32 | 4 | 0 in v1 |
 | 12 | `width` | uint16 | 2 | 1–528 |
@@ -275,7 +275,7 @@ The file header is exactly **64 bytes**.
 Before playback, a decoder MUST verify:
 
 - Magic is exactly `CPV\0`.
-- Major version is 1 and minor version is 0 or 1. Version 1.0 uses byte-sized INDEX_LITERAL values and has no frame compression or DELTA_MASK packets; version 1.1 enables the additions in this specification.
+- Major version is 1 and minor version is 0, 1, or 2. Version 1.0 uses byte-sized INDEX_LITERAL values and has no frame compression or DELTA_MASK packets; version 1.1 enables bit-packing, DELTA_MASK, and LZ4; version 1.2 adds DEFLATE frame payloads.
 - Header size is exactly 64.
 - Flags and all reserved fields are zero.
 - Width and height are within the specified limits.
@@ -363,7 +363,7 @@ Every stored frame is represented by a frame record. Its fixed header is exactly
 |---:|---|---|---:|---|
 | 0 | `magic` | char[4] | 4 | ASCII `FRM1` |
 | 4 | `frame_type` | uint8 | 1 | 0 = I-frame, 1 = P-frame |
-| 5 | `flags` | uint8 | 1 | Bit 0: payload is an independent LZ4 block; all other bits MUST be zero |
+| 5 | `flags` | uint8 | 1 | Bit 0: independent LZ4 block; bit 1: independent DEFLATE stream; all other bits zero. Exactly one compression flag may be set |
 | 6 | `header_size` | uint16 | 2 | 20 |
 | 8 | `frame_number` | uint32 | 4 | Sequential stored-record number, starting at 0 |
 | 12 | `duration_ms` | uint32 | 4 | Display duration |
@@ -374,7 +374,7 @@ The payload begins immediately after the frame header and contains exactly `payl
 
 ### 9.3 Optional independent LZ4 frame payload
 
-In CPV v1.1, frame flag bit 0 (`FRAME_FLAG_LZ4 = 0x01`) indicates that the stored frame payload is a raw LZ4 block. Each frame is compressed independently; there is no cross-frame LZ4 dictionary.
+In CPV v1.1 and v1.2, frame flag bit 0 (`FRAME_FLAG_LZ4 = 0x01`) indicates that the stored frame payload is a raw LZ4 block. CPV v1.2 additionally supports flag bit 1 (`FRAME_FLAG_DEFLATE = 0x02`), indicating a zlib-wrapped DEFLATE stream (which uses Huffman coding). Exactly one compression flag may be set. Each frame is compressed independently; there is no cross-frame dictionary.
 
 For a compressed frame, the stored payload is:
 
@@ -420,6 +420,12 @@ When coalescing, the encoder MUST add durations without exceeding the uint32 lim
 The total video duration is the sum of stored frame durations and MUST equal the file header's `duration_ms`.
 
 ---
+
+### 9.4 Optional independent DEFLATE frame payload (CPV v1.2)
+
+When frame flag bit 1 is set, the stored payload consists of a four-byte little-endian uncompressed packet-stream size followed by one zlib-wrapped DEFLATE stream. The stream MUST decompress to exactly the declared size. The same upper bound of 3 × width × height bytes applies. A decoder MUST reject invalid, truncated, trailing, or oversized DEFLATE data.
+
+DEFLATE is a lossless compressor using LZ77 and Huffman coding. It may be smaller than LZ4 for some packet streams but can require more decoder CPU and memory. An encoder MAY compare DEFLATE level 9 and LZ4 high-compression and select whichever complete representation (including the four-byte size prefix) is smaller, provided it is worthwhile. CPV v1.1 readers do not support this flag and MUST reject it.
 
 ## 10. Packet stream
 
@@ -832,11 +838,18 @@ The exact palette-size mapping, colour-distance thresholds, sampling policy, and
 
 The normal calculator profile SHOULD prioritise palette-coded data and exact SKIP detection. RAW565 SHOULD be used selectively.
 
-### 14.2 Hybrid global palette selection
+CPV v1.2 encoders SHOULD reserve the first eight palette entries, in this order, for RGB565 primary colours:
+- 0: red (0xF800)
+- 1: green (0x07E0)
+- 2: blue (0x001F)
+- 3: yellow (0xFFE0)
+- 4: cyan (0x07FF)
+- 5: magenta (0xF81F)
+- 6: black (0x0000)
+- 7: white (0xFFFF)
 
-Palette construction is encoder policy and does not change the file format. An encoder MAY reserve a small portion of its colour budget for anchor colours selected from actual preprocessed video samples. Suitable targets include dark, light, neutral, warm/skin-like, and primary or secondary colours. The selected anchor MUST be a colour observed in the sampled video; synthetic target colours are not required.
+These entries guarantee that the basic colour gamut is represented even when palette budgets are small. Remaining entries SHOULD be selected adaptively from the complete preprocessed video. Duplicate colours MUST be removed without changing the order of the reserved entries. Quality profiles MUST use at least eight colours.
 
-The remaining palette budget SHOULD be filled using a global colour quantiser over the preprocessed video. The encoder MUST ensure the final palette is unique after RGB565 conversion and MUST NOT exceed the configured palette budget. The sampling policy and anchor budget are implementation-defined.
 
 ### 14.1 Denoising
 
@@ -1087,18 +1100,18 @@ The desktop encoder and calculator decoder have different responsibilities. Pale
 CPV v1.1 requires:
 
 - Major version 1.
-- Minor version 1 for bit-packed palette literals, DELTA_MASK, and optional per-frame LZ4.
+- Minor version 1 for bit-packed palette literals, DELTA_MASK, and optional per-frame LZ4. Minor version 2 adds optional DEFLATE/Huffman-coded frame payloads.
 - Minor version 0 files retain the original byte-index packet semantics and have no compression flags.
 - A 64-byte file header.
 - A 20-byte frame header.
 - The four primary packet opcodes and the DELTA_MASK SKIP extension defined in Section 10.
 - The packet-length encoding and reserved DELTA_MASK sentinel defined in Section 10.1.
-- The bit-packed INDEX_LITERAL representation and optional independent LZ4 block representation.
+- The bit-packed INDEX_LITERAL representation and optional independent LZ4 block representation. CPV v1.2 also supports independent DEFLATE streams.
 - An `IDX1` index at the end of the file.
 
 A decoder MUST reject unknown major versions.
 
-A strict v1.0 decoder MUST reject a non-zero frame flag, DELTA_MASK sentinel, or other v1.1-only encoding. A v1.1 decoder MUST accept v1.0 files by using eight-bit INDEX_LITERAL values and rejecting v1.1-only flags and packets in minor version 0. Unknown frame flag bits MUST be rejected. Any future change that alters the container header, reconstruction model, or core packet grammar requires a new major version.
+A strict v1.0 decoder MUST reject a non-zero frame flag, DELTA_MASK sentinel, or other v1.1-only encoding. A v1.2 decoder MUST accept v1.0 and v1.1 files by using eight-bit INDEX_LITERAL values and rejecting v1.1-only flags and packets in minor version 0. Unknown frame flag bits MUST be rejected. Any future change that alters the container header, reconstruction model, or core packet grammar requires a new major version.
 
 ---
 
