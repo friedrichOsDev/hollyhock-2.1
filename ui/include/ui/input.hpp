@@ -9,7 +9,8 @@ enum EventType {
     EventKey,
     EventTouch,
     EventSystem,
-    EventUnknown
+    EventUnknown,
+    EventTimer
 };
 
 enum KeyAction {

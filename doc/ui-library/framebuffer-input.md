@@ -101,12 +101,13 @@ Return values:
 | EventTouch | x, y, touchAction, rawAction |
 | EventSystem | systemEvent |
 | EventUnknown | rawType |
+| EventTimer | rawType (SDK `EVENT_TIMER`, value 5) |
 
 Touch coordinates are passed through unchanged. They may be negative or outside the display; validate them before using them for drawing.
 
 Key actions are KeyPressed, KeyHeld, and KeyReleased. Touch actions are TouchDown, TouchDrag, TouchUp, and TouchActionBar. System events include action-bar resize, swap, rotate, escape, and settings.
 
-The SDK documents single-touch data in EVENT_TOUCH. Multi-touch is not exposed by this wrapper. Unknown SDK event types are retained as EventUnknown with their raw type.
+The SDK documents single-touch data in EVENT_TOUCH. Multi-touch is not exposed by this wrapper. SDK `EVENT_TIMER` is mapped to EventTimer, allowing applications to use the SDK timer notifications as playback or UI ticks. Other unknown SDK event types are retained as EventUnknown with their raw type.
 
 Poll() does not wait when there is no event. Applications can poll from their own event loop and call Framebuffer::Present() after drawing changes.
 

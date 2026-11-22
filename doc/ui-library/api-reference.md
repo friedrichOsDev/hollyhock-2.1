@@ -118,7 +118,7 @@ Framebuffer is non-copyable. It attaches to LCD VRAM and does not allocate a sec
 
 ~~~cpp
 enum EventType {
-    EventNone, EventKey, EventTouch, EventSystem, EventUnknown
+    EventNone, EventKey, EventTouch, EventSystem, EventUnknown, EventTimer
 };
 enum KeyAction {
     KeyActionUnknown, KeyPressed, KeyHeld, KeyReleased

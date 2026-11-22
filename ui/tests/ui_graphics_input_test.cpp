@@ -273,6 +273,13 @@ int main() {
           event.rawType == 0x7777,
           "Input preserves unknown event types");
 
+    inputEvent = {};
+    inputEvent.type = EVENT_TIMER;
+    Check(UI::Input::Poll(&event) == 1 &&
+          event.type == UI::EventTimer &&
+          event.rawType == EVENT_TIMER,
+          "Input maps the SDK timer event");
+
     inputResult = -1;
     Check(UI::Input::Poll(&event) == -2 && event.type == UI::EventNone,
           "Input resets output when the SDK call fails");

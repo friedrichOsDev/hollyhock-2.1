@@ -5,7 +5,7 @@
 APP_NAME("CPV Video Player")
 APP_DESCRIPTION("CPV v1.3 video player for fx-CP400")
 APP_AUTHOR("friedrichOsDev")
-APP_VERSION("3.1")
+APP_VERSION("3.2")
 
 namespace {
 
@@ -43,109 +43,91 @@ void AppendNumber(uint32_t value, char *out, unsigned capacity) {
     out[position] = 0;
 }
 
-void DrawNumberAt(UI::Framebuffer &screen, int x, int valueX, int y,
-                  const char *label, uint32_t value) {
-    char text[32];
-    AppendNumber(value, text, sizeof(text));
-    screen.DrawText(x, y, label, UI::Colors::Gray);
-    screen.DrawText(valueX, y, text, UI::Colors::White);
-}
-
-void DrawNumber(UI::Framebuffer &screen, int y, const char *label,
-                uint32_t value) {
-    DrawNumberAt(screen, 8, 166, y, label, value);
-}
-
-struct PlaybackState {
-    bool paused;
-    bool ended;
-    bool exit;
-    bool redraw;
-    bool touchLatched;
-    uint16_t latchedKey;
-    uint32_t remainingMs;
-    const char *lastInput;
-    const char *phase;
-    uint32_t workCurrent;
-    uint32_t workTotal;
-    uint16_t lastRawType;
-    uint16_t lastKeyCode;
-    uint32_t lastRawAction;
-    int32_t lastTouchX;
-    int32_t lastTouchY;
-
-    PlaybackState()
-        : paused(false), ended(false), exit(false), redraw(true),
-          touchLatched(false), latchedKey(0), remainingMs(0),
-          lastInput("START"), phase("START"), workCurrent(0), workTotal(0),
-          lastRawType(0), lastKeyCode(0), lastRawAction(0),
-          lastTouchX(0), lastTouchY(0) {}
-};
-
-struct DebugContext {
-    UI::Framebuffer *screen;
-    CPV::Decoder *decoder;
-    PlaybackState *state;
-};
-
-int DividePositive(int dividend, int divisor) {
-    if (dividend <= 0 || divisor <= 0)
-        return 0;
-    int quotient = 0;
-    while (dividend >= divisor) {
-        dividend -= divisor;
-        ++quotient;
+unsigned TextLength(const char *text) {
+    unsigned length = 0;
+    if (text) {
+        while (text[length] && length < 80U)
+            ++length;
     }
-    return quotient;
+    return length;
+}
+
+void DrawInlineText(UI::Framebuffer &screen, int &x, int y,
+                    const char *label, const char *value) {
+    screen.DrawText(x, y, label, UI::Colors::Gray);
+    x += static_cast<int>(TextLength(label) * 6U);
+    screen.DrawText(x, y, value ? value : "-", UI::Colors::White);
+    x += static_cast<int>(TextLength(value ? value : "-") * 6U) + 8;
+}
+
+void DrawInlineNumber(UI::Framebuffer &screen, int &x, int y,
+                      const char *label, uint32_t value) {
+    char number[12];
+    AppendNumber(value, number, sizeof(number));
+    DrawInlineText(screen, x, y, label, number);
 }
 
 void DrawDebugPage(UI::Framebuffer &screen, const CPV::Decoder &decoder,
                    const PlaybackState &state, const char *operation,
                    uint32_t current, uint32_t total) {
-    screen.Clear(UI::Colors::Black);
-    screen.DrawText(8, 4, "CPV DEBUG MODE", UI::Colors::Yellow);
-    screen.DrawLine(8, 15, screen.Width() - 8, 15, UI::Colors::Gray);
-
-    screen.DrawText(8, 22, "OPERATION:", UI::Colors::Gray);
-    screen.DrawText(92, 22, operation ? operation : "UNKNOWN",
-                    UI::Colors::White);
-    screen.DrawText(8, 38, "STATE:", UI::Colors::Gray);
-    screen.DrawText(92, 38, state.paused ? "PAUSED" :
+    // fx-CP400 is used in portrait orientation (about 320x528). Keep the
+    // diagnostic panel in the top strip; the video remains visible below.
+    const int panelHeight = 142;
+    screen.FillRect(0, 0, screen.Width(), panelHeight, UI::Colors::Black);
+    screen.DrawText(8, 4, "CPV DEBUG", UI::Colors::Yellow);
+    screen.DrawText(112, 4, state.paused ? "PAUSED" :
                     (state.ended ? "ENDED" : "PLAYING"),
                     state.paused ? UI::Colors::Yellow : UI::Colors::Green);
+    screen.DrawLine(8, 14, screen.Width() - 8, 14, UI::Colors::Gray);
+
+    screen.DrawText(8, 20, "OP:", UI::Colors::Gray);
+    screen.DrawText(32, 20, operation ? operation : "UNKNOWN",
+                    UI::Colors::White);
+    screen.DrawText(8, 32, "IN:", UI::Colors::Gray);
+    screen.DrawText(32, 32, state.lastInput ? state.lastInput : "NONE",
+                    UI::Colors::White);
+
+    int x = 8;
+    DrawInlineNumber(screen, x, 44, "EVT:", state.lastRawType);
+    DrawInlineNumber(screen, x, 44, "ACT:", state.lastRawAction);
+    DrawInlineNumber(screen, x, 44, "KEY:", state.lastKeyCode);
+
+    x = 8;
+    DrawInlineNumber(screen, x, 56, "X:", static_cast<uint32_t>(state.lastTouchX));
+    DrawInlineNumber(screen, x, 56, "Y:", static_cast<uint32_t>(state.lastTouchY));
+
+    x = 8;
+    DrawInlineNumber(screen, x, 68, "WORK:", current);
+    DrawInlineText(screen, x, 68, "/", "");
+    DrawInlineNumber(screen, x, 68, "", total);
+    DrawInlineNumber(screen, x, 68, "TICK:", state.timerEventCount);
+
+    x = 8;
+    DrawInlineNumber(screen, x, 80, "FRAME:",
+                     decoder.HasFrame() ? decoder.CurrentFrame() + 1U : 0U);
+    DrawInlineNumber(screen, x, 80, "LEFT:", state.remainingMs);
+
+    x = 8;
+    DrawInlineNumber(screen, x, 92, "READ:", decoder.LastReadBytes());
+    DrawInlineNumber(screen, x, 92, "ST:", decoder.LastStoredFrameBytes());
+    DrawInlineNumber(screen, x, 92, "DEC:", decoder.LastDecodedFrameBytes());
+
+    x = 8;
+    DrawInlineNumber(screen, x, 104, "PKT:", decoder.LastPacketCount());
+    DrawInlineNumber(screen, x, 104, "LIT:", decoder.PacketCount(0));
+    DrawInlineNumber(screen, x, 104, "REP:", decoder.PacketCount(1));
+    DrawInlineNumber(screen, x, 104, "SKP:", decoder.PacketCount(2));
+
+    x = 8;
+    DrawInlineNumber(screen, x, 116, "RAW:", decoder.PacketCount(3));
+    DrawInlineNumber(screen, x, 116, "MASK:", decoder.PacketCount(4));
+    DrawInlineNumber(screen, x, 116, "SEEK:", decoder.LastSeekFrames());
+
     const uint8_t compression = decoder.LastCompression();
     const char *codec = compression == 1 ? "LZ4" :
                         compression == 2 ? "DEFLATE" : "RAW";
-    screen.DrawText(270, 38, "CODEC:", UI::Colors::Gray);
-    screen.DrawText(318, 38, codec, UI::Colors::White);
-    screen.DrawText(8, 54, "INPUT:", UI::Colors::Gray);
-    screen.DrawText(92, 54, state.lastInput ? state.lastInput : "NONE",
-                    UI::Colors::White);
-
-    DrawNumberAt(screen, 8, 166, 70, "EVENT TYPE:", state.lastRawType);
-    DrawNumberAt(screen, 270, 402, 70, "RAW ACTION:", state.lastRawAction);
-    DrawNumberAt(screen, 8, 166, 86, "KEY CODE:", state.lastKeyCode);
-    DrawNumberAt(screen, 270, 402, 86, "TOUCH X:",
-                 static_cast<uint32_t>(state.lastTouchX));
-    DrawNumberAt(screen, 270, 402, 102, "TOUCH Y:",
-                 static_cast<uint32_t>(state.lastTouchY));
-
-    DrawNumber(screen, 102, "WORK CURRENT:", current);
-    DrawNumber(screen, 118, "WORK TOTAL:", total);
-    DrawNumber(screen, 134, "FRAME:",
-               decoder.HasFrame() ? decoder.CurrentFrame() + 1U : 0U);
-    DrawNumber(screen, 150, "LAST READ BYTES:", decoder.LastReadBytes());
-    DrawNumber(screen, 166, "STORED FRAME BYTES:",
-               decoder.LastStoredFrameBytes());
-    DrawNumber(screen, 182, "DECODED FRAME BYTES:",
-               decoder.LastDecodedFrameBytes());
-    DrawNumber(screen, 198, "PACKET COUNT:", decoder.LastPacketCount());
-    DrawNumber(screen, 214, "INDEX_LITERAL:", decoder.PacketCount(0));
-    DrawNumber(screen, 230, "INDEX_REPEAT:", decoder.PacketCount(1));
-    DrawNumber(screen, 246, "SKIP:", decoder.PacketCount(2));
-    DrawNumber(screen, 262, "RAW565:", decoder.PacketCount(3));
-    DrawNumber(screen, 278, "DELTA_MASK:", decoder.PacketCount(4));
-    DrawNumber(screen, 294, "SEEK DECODED:", decoder.LastSeekFrames());
+    screen.DrawText(8, 128, "CODEC:", UI::Colors::Gray);
+    screen.DrawText(50, 128, codec, UI::Colors::White);
     screen.Present();
 }
 
@@ -241,11 +223,11 @@ void DrawFrame(UI::Framebuffer &screen, const CPV::Decoder &decoder,
 void DrawCurrent(UI::Framebuffer &screen, const CPV::Decoder &decoder,
                  const PlaybackState &state, bool debugMode,
                  bool showControls) {
+    DrawFrame(screen, decoder, debugMode ? false : showControls,
+              state.paused, state.ended);
     if (debugMode) {
         DrawDebugPage(screen, decoder, state, state.phase,
                       state.workCurrent, state.workTotal);
-    } else {
-        DrawFrame(screen, decoder, showControls, state.paused, state.ended);
     }
 }
 
@@ -268,6 +250,15 @@ void SeekRelative(CPV::Decoder &decoder, int32_t delta,
         state.redraw = true;
         state.ended = false;
     }
+}
+
+void AdvancePlaybackSlice(PlaybackState &state) {
+    if (state.paused || state.ended)
+        return;
+    if (state.remainingMs > kWaitSliceMs)
+        state.remainingMs -= kWaitSliceMs;
+    else
+        state.remainingMs = 0;
 }
 
 void TogglePlayback(PlaybackState &state, CPV::Decoder &decoder) {
@@ -373,6 +364,9 @@ void PlayVideo(UI::Application &app, const char *path,
         return;
     }
 
+    screen.Clear(UI::Colors::Black);
+    screen.Present();
+
     PlaybackState state;
     DebugContext debugContext = {&screen, &decoder, &state};
     if (debugMode)
@@ -442,19 +436,27 @@ void PlayVideo(UI::Application &app, const char *path,
         }
         if (result == 1) {
             HandleEvent(event, decoder, state, screen.Width());
+            if (event.type == UI::EventTimer) {
+                ++state.timerEventCount;
+                AdvancePlaybackSlice(state);
+            }
+
             if (state.redraw && !state.exit) {
                 DrawCurrent(screen, decoder, state, debugMode, showControls);
                 state.redraw = false;
-            } else if (debugMode && !state.exit) {
-                DrawCurrent(screen, decoder, state, true, showControls);
+            } else if (debugMode && !state.exit &&
+                       event.type != UI::EventTimer) {
+                // Update the small diagnostic panel without redrawing the video.
+                DrawDebugPage(screen, decoder, state, state.phase,
+                              state.workCurrent, state.workTotal);
+            } else if (debugMode && !state.exit &&
+                       (state.timerEventCount & 0x07U) == 0U) {
+                DrawDebugPage(screen, decoder, state, state.phase,
+                              state.workCurrent, state.workTotal);
             }
         } else {
             WaitMilliseconds(kWaitSliceMs);
-            if (!state.paused && !state.ended &&
-                state.remainingMs > kWaitSliceMs)
-                state.remainingMs -= kWaitSliceMs;
-            else if (!state.paused && !state.ended)
-                state.remainingMs = 0;
+            AdvancePlaybackSlice(state);
         }
     }
 
