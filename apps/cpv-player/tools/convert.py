@@ -200,16 +200,25 @@ def make_filter(
 
 
 def palette_limit_for_palette_quality(palette_quality: int) -> int:
-    """Map palette quality to FFmpeg's single global palette budget."""
-    if palette_quality < 15:
+    """Map quality to a compact palette budget, with useful low-quality steps."""
+    if palette_quality < 5:
+        return 4
+    if palette_quality < 10:
+        return 8
+    if palette_quality < 25:
         return 16
-    if palette_quality < 35:
+    if palette_quality < 40:
         return 32
-    if palette_quality < 55:
+    if palette_quality < 60:
         return 64
-    if palette_quality < 75:
+    if palette_quality < 80:
         return 128
     return 256
+
+
+# Hybrid palette anchors: target colours are represented by colours actually
+# sampled from the preprocessed video, so anchors cannot introduce off-video RGB.
+ANCHOR_TARGETS = (0x0000, 0xFFFF, 0x8410, 0xFBE0, 0xF800, 0x07E0, 0x001F, 0x07FF, 0xFFE0)
 
 
 def _run_checked(command: list[str], description: str) -> subprocess.CompletedProcess[bytes]:
@@ -220,6 +229,65 @@ def _run_checked(command: list[str], description: str) -> subprocess.CompletedPr
     except subprocess.CalledProcessError as exc:
         detail = exc.stderr.decode("utf-8", errors="replace").strip()
         raise ConversionError(f"{description} failed" + (f": {detail}" if detail else "")) from exc
+
+
+def _sample_video_histogram(
+    ffmpeg: str, source: Path, width: int, height: int, fit: str,
+    background: str, preprocess_quality: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Sample one processed frame per second and return RGB565 colours/counts."""
+    sample_filter = make_filter(
+        width, height, Fraction(1, 1), fit, background, preprocess_quality
+    )
+    command = [
+        ffmpeg, "-hide_banner", "-loglevel", "error", "-i", str(source),
+        "-map", "0:v:0", "-an", "-sn", "-dn", "-vf", sample_filter,
+        "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1",
+    ]
+    raw = _run_checked(command, "hybrid palette sampling").stdout
+    frame_bytes = width * height * 3
+    if not raw or len(raw) % frame_bytes:
+        raise ConversionError("FFmpeg returned an incomplete RGB sample frame")
+    rgb = np.frombuffer(raw, dtype=np.uint8).reshape(-1, 3).astype(np.uint16)
+    r = (rgb[:, 0] * 31 + 127) // 255
+    g = (rgb[:, 1] * 63 + 127) // 255
+    b = (rgb[:, 2] * 31 + 127) // 255
+    pixels = ((r << 11) | (g << 5) | b).astype(np.uint16)
+    colours, counts = np.unique(pixels, return_counts=True)
+    return colours, counts.astype(np.uint64)
+
+
+def select_hybrid_anchors(colours, counts, palette_budget: int) -> np.ndarray:
+    """Select frequent, video-derived colours near important anchor targets."""
+    if palette_budget <= 4:
+        anchor_budget = 2
+    elif palette_budget <= 16:
+        anchor_budget = 4
+    else:
+        anchor_budget = min(6, palette_budget // 4)
+    if colours.size == 0 or anchor_budget == 0:
+        return np.empty(0, dtype=np.uint16)
+
+    values = colours.astype(np.uint16)
+    r = ((values >> 11) & 31).astype(np.int16)
+    g = ((values >> 5) & 63).astype(np.int16)
+    b = (values & 31).astype(np.int16)
+    total = int(counts.sum())
+    min_count = max(2, total // 20000)
+    selected: list[int] = []
+    for target in ANCHOR_TARGETS:
+        tr, tg, tb = (target >> 11) & 31, (target >> 5) & 63, target & 31
+        distance = 3 * (r-tr)**2 + 4 * (g-tg)**2 + 2 * (b-tb)**2
+        candidates = np.flatnonzero((distance <= 900) & (counts >= min_count))
+        if candidates.size == 0:
+            continue
+        order = np.lexsort((-counts[candidates], distance[candidates]))
+        chosen = int(values[candidates[order[0]]])
+        if chosen not in selected:
+            selected.append(chosen)
+        if len(selected) >= anchor_budget:
+            break
+    return np.asarray(selected, dtype=np.uint16)
 
 
 def build_global_palette(
@@ -233,16 +301,23 @@ def build_global_palette(
     preprocess_quality: int,
     temp_dir: Path,
 ):
-    """Build a global palette from frames passed through the same pre-processing."""
+    """Build a hybrid palette: selected video colours plus FFmpeg quantisation."""
     require_numpy()
     max_colours = palette_limit_for_palette_quality(palette_quality)
     palette_path = temp_dir / "palette.png"
+
+    sampled_colours, sampled_counts = _sample_video_histogram(
+        ffmpeg, source, width, height, fit, background, preprocess_quality
+    )
+    anchors = select_hybrid_anchors(sampled_colours, sampled_counts, max_colours)
+    remaining_budget = max(2, max_colours - int(anchors.size))
+
     sample_filter = make_filter(
         width, height, Fraction(1, 1), fit, background, preprocess_quality
     )
     video_filter = (
         sample_filter
-        + f",palettegen=max_colors={max_colours}:stats_mode=full:reserve_transparent=0"
+        + f",palettegen=max_colors={remaining_budget}:stats_mode=full:reserve_transparent=0"
     )
     command = [
         ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
@@ -264,17 +339,14 @@ def build_global_palette(
     red = (rgb[:, 0] * 31 + 127) // 255
     green = (rgb[:, 1] * 63 + 127) // 255
     blue = (rgb[:, 2] * 31 + 127) // 255
-    colours = ((red << 11) | (green << 5) | blue).astype(np.uint16)
+    generated = ((red << 11) | (green << 5) | blue).astype(np.uint16)
 
-    # Keep palette order, remove duplicate entries, and ignore transparent/padded
-    # palette slots which collapse to the same RGB565 value.
-    _, first_indices = np.unique(colours, return_index=True)
-    palette = np.ascontiguousarray(colours[np.sort(first_indices)], dtype=np.uint16)
-    if palette.size == 0 or palette.size > 256:
-        raise ConversionError(f"invalid global palette size: {palette.size}")
+    merged = np.concatenate((anchors, generated))
+    _, first_indices = np.unique(merged, return_index=True)
+    palette = np.ascontiguousarray(merged[np.sort(first_indices)][:max_colours], dtype=np.uint16)
+    if palette.size == 0 or palette.size > max_colours:
+        raise ConversionError(f"invalid hybrid global palette size: {palette.size}")
     return palette, max_colours
-
-
 def build_rgb565_lookup(palette):
     """Build one 65,536-entry lookup table, avoiding a 256-colour search per pixel."""
     require_numpy()
@@ -647,8 +719,9 @@ def compress_frame_payload(payload: bytes, enabled: bool) -> tuple[bytes, int, i
     if not enabled:
         return payload, 0, 0
     require_lz4()
+    # High-compression mode spends desktop CPU to reduce calculator storage.
     compressed = lz4_block.compress(
-        payload, mode="fast", acceleration=1, store_size=False
+        payload, mode="high_compression", compression=9, store_size=False
     )
     stored = struct.pack("<I", len(payload)) + compressed
     saving = len(payload) - len(stored)
@@ -962,7 +1035,7 @@ def convert(args: argparse.Namespace) -> None:
             f"  Stored frames: {stored_frame_count}\n"
             f"  Keyframes: {len(index_entries)}\n"
             f"  Duration: {seconds:.3f} s\n"
-            f"  Palette: {palette.size} colours\n"
+            f"  Palette: {palette.size} colours (hybrid video anchors + generated colours)\n"
             f"  Palette quality: {args.palette_quality}/100\n"
             f"  Pre-process quality: {args.preprocess_quality}/100\n"
             f"  Palette index width: {bits_per_index(int(palette.size))} bits\n"
@@ -1004,7 +1077,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--palette-quality", type=int, choices=range(0, 101), default=75,
-        help="palette quality: 0 (16 colours) to 100 (RGB565-preserving RAW fallback; default: 75)",
+        help="palette budget: 0 (4 colours) to 100 (256 colours + RAW565 fallback; default: 75)",
     )
     parser.add_argument(
         "--preprocess-quality", type=int, choices=range(0, 101), default=0,
