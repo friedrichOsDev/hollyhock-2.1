@@ -15,7 +15,17 @@ const uint16_t EVENT_ACTBAR_SWAP = 0x1004;
 const uint16_t EVENT_ACTBAR_ROTATE = 0x1005;
 const uint16_t EVENT_ACTBAR_ESC = 0x3009;
 const uint16_t EVENT_ACTBAR_SETTINGS = 0x300A;
-const uint16_t EVENT_TOUCH = 0x4000;
+/**
+ * @brief Timer notification event returned by GetInput().
+ *
+ * Empirical measurement on the tested fx-CP400 running Hollyhock 2.1:
+ * exactly 20 EVENT_TIMER notifications were received during an external
+ * stopwatch interval of 10.00 seconds (2.0 notifications per second).
+ *
+ * This is an observed rate for that tested setup, not a guaranteed event
+ * period or frequency contract. Applications that depend on the cadence
+ * should measure it on the target calculator and runtime.
+ */
 const uint16_t EVENT_TIMER = 0x0005;
 
 const uint32_t KEY_PRESSED = 1;

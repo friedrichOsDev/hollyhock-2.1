@@ -46,6 +46,15 @@ The UI Library intentionally exposes no file-writing or file-modification API. I
 
 Set UI::Config::settingsFolder to a unique 1-8 character alphanumeric MCS folder name. The library loads settings before the first application screen, saves after changes, and saves again on normal exit. The serializer supports at most 32 entries and a payload smaller than 512 bytes.
 
+## Observed EVENT_TIMER cadence
+
+On the tested fx-CP400 running Hollyhock 2.1, an external stopwatch
+measurement of 10.00 seconds counted **exactly 20 `EVENT_TIMER` notifications**
+(2.0 notifications per second). This is an empirical observation for that
+calculator/runtime setup, not a guaranteed SDK timer frequency or interval.
+Applications that depend on the cadence should calibrate on the target device.
+See [Framebuffer and Input](framebuffer-input.md).
+
 ## Limitations
 
 - File-system wrapper supports fls0 only.

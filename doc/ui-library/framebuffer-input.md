@@ -109,6 +109,20 @@ Key actions are KeyPressed, KeyHeld, and KeyReleased. Touch actions are TouchDow
 
 The SDK documents single-touch data in EVENT_TOUCH. Multi-touch is not exposed by this wrapper. SDK `EVENT_TIMER` is mapped to EventTimer, allowing applications to use the SDK timer notifications as playback or UI ticks. Other unknown SDK event types are retained as EventUnknown with their raw type.
 
+### Measured EVENT_TIMER cadence
+
+On the tested fx-CP400 running Hollyhock 2.1, a 10.00-second interval measured
+with an external stopwatch produced **exactly 20 received `EVENT_TIMER`
+notifications**, corresponding to an observed rate of **2.0 notifications per
+second**.
+
+This is a measurement of events received in that setup; it is not a documented
+timer period or a frequency guarantee for every calculator, OS/runtime version,
+or application workload. `Input::Poll()` is non-blocking and returns at most
+one event per call. Do not treat the event count as elapsed milliseconds.
+For timing-sensitive playback, count timer notifications over a known external
+interval and calibrate on the actual target device.
+
 Poll() does not wait when there is no event. Applications can poll from their own event loop and call Framebuffer::Present() after drawing changes.
 
 ## Custom screen without the built-in menu

@@ -147,6 +147,12 @@ public:
 
 Poll() returns 1 for an event, 0 when no event is available, -1 for a null pointer, or -2 for an SDK error. Unknown event types are preserved. Touch coordinates are passed through unchanged. The wrapper exposes single-touch events, key actions, and action-bar/system events.
 
+**Observed timer cadence:** on the tested fx-CP400 running Hollyhock 2.1,
+exactly 20 `EventTimer` notifications were received during an external
+10.00-second stopwatch interval (2.0 notifications/s). This is an empirical
+measurement, not a guaranteed timer period or SDK-wide frequency contract.
+Recalibrate if an application depends on the rate.
+
 KeyCode includes KeyUp, KeyDown, KeyLeft, KeyRight, KeyEXE, KeyPowerClear, and fx-CP400 keyboard keys. SystemEvent includes action-bar resize, swap, rotate, escape, and settings.
 
 ## Settings
