@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate, decode, and preview CPV v1.1 global-palette video files."""
+"""Validate, decode, and preview CPV v1.2 global-palette video files."""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ except ImportError:
 
 MAGIC = b"CPV\0"
 VERSION_MAJOR = 1
-VERSION_MINOR = 1
+VERSION_MINOR = 2
 
 HEADER = struct.Struct("<4sBBHIHHHHIHHIIII20s")
 FRAME_HEADER = struct.Struct("<4sBBHIII")
@@ -37,6 +37,8 @@ MAX_HEIGHT = 320
 MAX_FPS = 30
 MAX_RUN_LENGTH = 8191
 FRAME_FLAG_LZ4 = 0x01
+FRAME_FLAG_DEFLATE = 0x02
+FRAME_FLAGS_MASK = FRAME_FLAG_LZ4 | FRAME_FLAG_DEFLATE
 
 FRAME_I = 0
 FRAME_P = 1
@@ -132,9 +134,9 @@ class CPVFile:
 
         if magic != MAGIC:
             raise CPVError("invalid magic; expected CPV\\0")
-        if major != VERSION_MAJOR or minor not in (0, VERSION_MINOR):
+        if major != VERSION_MAJOR or minor not in (0, 1, VERSION_MINOR):
             raise CPVError(
-                f"unsupported CPV version {major}.{minor}; this player supports 1.0 and 1.1"
+                f"unsupported CPV version {major}.{minor}; this player supports 1.0, 1.1 and 1.2"
             )
         self.version_minor = minor
         self.index_bits = 8 if minor == 0 else max(1, (self.palette_count - 1).bit_length())
@@ -212,7 +214,7 @@ class CPVFile:
                 raise CPVError(f"frame {number} has invalid magic; expected FRM1")
             if frame_type not in (FRAME_I, FRAME_P):
                 raise CPVError(f"frame {number} has unknown type {frame_type}")
-            if frame_flags & ~FRAME_FLAG_LZ4:
+            if frame_flags & ~FRAME_FLAGS_MASK or frame_flags == FRAME_FLAGS_MASK:
                 raise CPVError(f"frame {number} has unknown flag bits 0x{frame_flags:02x}")
             if minor == 0 and frame_flags != 0:
                 raise CPVError(f"CPV 1.0 frame {number} must have zero flags")
@@ -283,7 +285,7 @@ class CPVFile:
     def _read_payload(self, record: FrameRecord) -> bytes:
         pixel_count = self.width * self.height
         max_decoded_size = pixel_count * 3
-        if record.flags & FRAME_FLAG_LZ4:
+        if record.flags & (FRAME_FLAG_LZ4 | FRAME_FLAG_DEFLATE):
             if self.version_minor < 1:
                 raise CPVError(f"frame {record.number}: LZ4 is not valid in CPV 1.0")
             if lz4_block is None:
@@ -304,14 +306,30 @@ class CPVFile:
             if record.payload_size - 4 >= decoded_size:
                 raise CPVError(f"frame {record.number}: LZ4 block is not smaller than raw payload")
             try:
-                decoded = lz4_block.decompress(stored[4:], uncompressed_size=decoded_size)
+                if record.flags == FRAME_FLAG_LZ4:
+                    if lz4_block is None:
+                        raise CPVError(
+                            "this video uses LZ4-HC; install python-lz4 "
+                            "(Arch/CachyOS: sudo pacman -S python-lz4)"
+                        )
+                    decoded = lz4_block.decompress(stored[4:], uncompressed_size=decoded_size)
+                elif record.flags == FRAME_FLAG_DEFLATE:
+                    import zlib
+                    decoder = zlib.decompressobj()
+                    decoded = decoder.decompress(stored[4:], decoded_size + 1)
+                    if decoder.unconsumed_tail or not decoder.eof or decoder.unused_data:
+                        raise CPVError(f"frame {record.number}: invalid DEFLATE stream or trailing data")
+                    decoded += decoder.flush()
+                else:
+                    raise CPVError(f"frame {record.number}: invalid compression flags")
+            except CPVError:
+                raise
             except Exception as exc:
-                raise CPVError(f"frame {record.number}: LZ4 decompression failed: {exc}") from exc
+                raise CPVError(f"frame {record.number}: decompression failed: {exc}") from exc
             if len(decoded) != decoded_size:
                 raise CPVError(
-                    f"frame {record.number}: LZ4 decoded {len(decoded)} bytes, expected {decoded_size}"
-                )
-            return decoded
+                    f"frame {record.number}: decoded {len(decoded)} bytes, expected {decoded_size}"
+                )            return decoded
 
         if record.payload_size > max_decoded_size:
             raise CPVError(
