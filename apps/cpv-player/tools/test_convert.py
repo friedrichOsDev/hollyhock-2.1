@@ -79,6 +79,56 @@ class PackingTests(unittest.TestCase):
         self.assertEqual(decoded, payload)
 
 
+class CompressionDecoderTests(unittest.TestCase):
+    def test_deflate_decoder_payload(self):
+        import zlib
+        payload = (b"palette indices and packet streams " * 200)
+        compressed = zlib.compress(payload, level=9)
+        record_payload = len(payload).to_bytes(4, "little") + compressed
+        with tempfile.TemporaryDirectory(prefix="cpv_deflate_") as temp:
+            path = Path(temp) / "frame.bin"
+            path.write_bytes(record_payload)
+            reader = object.__new__(play.CPVFile)
+            reader.width = 32
+            reader.height = 24
+            reader.version_minor = 2
+            reader.file_size = path.stat().st_size
+            reader.stream = path.open("rb")
+            record = play.FrameRecord(
+                number=0, frame_type=play.FRAME_I, duration_ms=200,
+                flags=play.FRAME_FLAG_DEFLATE, payload_size=len(record_payload),
+                file_offset=0, payload_offset=0, start_ms=0,
+            )
+            try:
+                self.assertEqual(reader._read_payload(record), payload)
+            finally:
+                reader.close()
+
+    def test_deflate_flag_rejected_for_v1_1(self):
+        import zlib
+        payload = b"small packet data " * 50
+        stored = len(payload).to_bytes(4, "little") + zlib.compress(payload, level=9)
+        with tempfile.TemporaryDirectory(prefix="cpv_deflate_v11_") as temp:
+            path = Path(temp) / "frame.bin"
+            path.write_bytes(stored)
+            reader = object.__new__(play.CPVFile)
+            reader.width = 32
+            reader.height = 24
+            reader.version_minor = 1
+            reader.file_size = path.stat().st_size
+            reader.stream = path.open("rb")
+            record = play.FrameRecord(
+                number=0, frame_type=play.FRAME_I, duration_ms=200,
+                flags=play.FRAME_FLAG_DEFLATE, payload_size=len(stored),
+                file_offset=0, payload_offset=0, start_ms=0,
+            )
+            try:
+                with self.assertRaises(play.CPVError):
+                    reader._read_payload(record)
+            finally:
+                reader.close()
+
+
 class IntegrationTests(unittest.TestCase):
     def test_short_video_encode_decode_round_trip(self):
         import numpy as np
