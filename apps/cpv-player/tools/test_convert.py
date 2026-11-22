@@ -19,12 +19,20 @@ SPEC.loader.exec_module(convert)
 
 class PaletteTests(unittest.TestCase):
     def test_palette_quality_budget(self):
-        cases = [(0, 4), (4, 4), (5, 8), (9, 8), (10, 16), (24, 16),
+        cases = [(0, 8), (4, 8), (5, 8), (9, 8), (10, 16), (24, 16),
                  (25, 32), (39, 32), (40, 64), (59, 64), (60, 128),
                  (79, 128), (80, 256), (99, 256), (100, 256)]
         for quality, expected in cases:
             with self.subTest(quality=quality):
                 self.assertEqual(convert.palette_limit_for_palette_quality(quality), expected)
+
+    def test_palette_contains_fixed_base_colours_first(self):
+        import numpy as np
+        generated = np.array([0x1234, 0xF800, 0x07E0], dtype=np.uint16)
+        palette = convert.merge_hybrid_palette(generated, 16)
+        self.assertEqual(palette[:8].tolist(), list(convert.FIXED_BASE_PALETTE))
+        self.assertIn(0x1234, palette.tolist())
+        self.assertLessEqual(palette.size, 16)
 
     def test_anchor_colours_are_from_video_sample(self):
         # RGB565: black, near-white, red, green, blue, plus an unrelated colour.
@@ -75,15 +83,19 @@ class PackingTests(unittest.TestCase):
                 recovered.append(int(np.sum(chunk * (1 << np.arange(width)))))
             self.assertEqual(recovered, values.tolist())
 
-    def test_lz4_high_compression_round_trip(self):
+    def test_frame_compression_selects_lz4_or_deflate_and_round_trips(self):
         if convert.lz4_block is None:
             self.skipTest("python-lz4 not installed")
         payload = (b"CPV repeated test data " * 500) + bytes(range(256))
         stored, flags, saved = convert.compress_frame_payload(payload, True)
-        self.assertTrue(flags & convert.FRAME_FLAG_LZ4)
+        self.assertIn(flags, (convert.FRAME_FLAG_LZ4, convert.FRAME_FLAG_DEFLATE))
         self.assertGreater(saved, 0)
         decoded_size = int.from_bytes(stored[:4], "little")
-        decoded = convert.lz4_block.decompress(stored[4:], uncompressed_size=decoded_size)
+        if flags == convert.FRAME_FLAG_LZ4:
+            decoded = convert.lz4_block.decompress(stored[4:], uncompressed_size=decoded_size)
+        else:
+            import zlib
+            decoded = zlib.decompress(stored[4:])
         self.assertEqual(decoded_size, len(payload))
         self.assertEqual(decoded, payload)
 
