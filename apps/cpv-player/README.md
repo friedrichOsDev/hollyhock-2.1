@@ -25,7 +25,7 @@ python3 -c "import numpy, lz4.block; print(numpy.__version__, lz4.__version__)"
 python3 -m tkinter
 ```
 
-The converter uses NumPy to accelerate RGB565 conversion, palette lookup, bit-packing, delta analysis, and packet preparation. The desktop player uses NumPy for frame decoding and RGB preview conversion, and python-lz4 for independently compressed frame payloads.
+The converter uses NumPy to accelerate RGB565 conversion, palette lookup, bit-packing, delta analysis, and packet preparation. The hybrid palette preserves selected frequent video-derived anchor colours, then FFmpeg fills the remaining budget. LZ4 uses high-compression mode (slower conversion, smaller output). The desktop player uses NumPy for frame decoding and RGB preview conversion, and python-lz4 for independently compressed frame payloads.
 
 ## Convert a video
 
@@ -55,7 +55,7 @@ python3 tools/convert.py input.mp4 \
 
 The input must be readable by FFmpeg. CPV v1 supports dimensions from 1×1 up to 528×320 pixels and frame rates greater than 0 and no greater than 30 FPS.
 
-By default, the converter preserves the source aspect ratio and fills unused space with black. It builds one global palette for the complete video, maps source RGB565 pixels through a precomputed lookup table, and writes linear I/P-frame packet streams. The converter streams completed frame records to a temporary output file rather than accumulating the complete compressed video in memory.
+By default, the converter preserves the source aspect ratio and fills unused space with black. It samples the preprocessed video at one frame per second to find frequent colours near useful anchor targets (dark, light, grey, warm skin-like, and primary/secondary colours). These anchors are actual colours found in the video, not synthetic colours. FFmpeg's palette quantiser fills the remaining global palette budget. The converter then maps source RGB565 pixels through a precomputed lookup table and writes linear I/P-frame packet streams. The converter streams completed frame records to a temporary output file rather than accumulating the complete compressed video in memory.
 
 ### Compression settings
 
@@ -63,9 +63,9 @@ CPV v1.1 applies three independent optimisations:
 
 1. **Bit-packed palette indices.** INDEX_LITERAL and DELTA_MASK indices use the minimum width for the active palette: 4 bits for up to 16 colours, 5 bits for up to 32, 6 bits for up to 64, 7 bits for up to 128, and 8 bits for up to 256. INDEX_REPEAT keeps a one-byte index.
 2. **DELTA_MASK packets.** Mixed spans of changed and unchanged pixels are represented by a bitmask. The encoder compares the complete byte cost against ordinary SKIP plus data packets and emits the mask only when it is smaller.
-3. **Per-frame LZ4.** Each frame's packet stream can be compressed as an independent LZ4 block. It is stored only when the four-byte decoded-size prefix plus compressed data is smaller than the uncompressed packet stream. No LZ4 dictionary is shared between frames, so keyframe seeking remains simple.
+3. **Per-frame LZ4 high compression.** Each frame's packet stream is compressed using LZ4 high-compression mode, trading additional desktop conversion time for smaller data. It is stored only when the four-byte decoded-size prefix plus compressed data is smaller than the uncompressed packet stream. No LZ4 dictionary is shared between frames, so keyframe seeking remains simple.
 
-The converter enables DELTA_MASK and LZ4 by default. Use `--no-delta-mask` and/or `--no-lz4` to disable them for benchmarks. The resulting statistics let you compare each optimisation independently.
+The converter enables DELTA_MASK and LZ4 by default. LZ4 uses high-compression mode; this may increase conversion time. Use `--no-delta-mask` and/or `--no-lz4` to disable them for benchmarks. The resulting statistics let you compare each optimisation independently.
 
 ### Independent quality settings
 
@@ -77,11 +77,13 @@ The converter separates colour quantisation from pre-processing. Adjust these in
 
 | Palette quality | Palette budget | Behaviour |
 |---:|---:|---|
-| 0–14 | 16 colours | Strong colour quantisation |
-| 15–34 | 32 colours | Aggressive colour reduction |
-| 35–54 | 64 colours | Balanced colour reduction |
-| 55–74 | 128 colours | Higher colour fidelity |
-| 75–99 | 256 colours | Highest palette budget |
+| 0–4 | 4 colours | Extreme quantisation |
+| 5–9 | 8 colours | Very strong quantisation |
+| 10–24 | 16 colours | Strong colour quantisation |
+| 25–39 | 32 colours | Aggressive colour reduction |
+| 40–59 | 64 colours | Balanced colour reduction |
+| 60–79 | 128 colours | Higher colour fidelity |
+| 80–99 | 256 colours | Highest palette budget |
 | 100 | Up to 256 + RAW565 | Preserve every source RGB565 value |
 
 Palette quality 100 uses RAW565 packets for pixels that cannot be represented exactly by the global palette. It is intended for lossless-within-RGB565 colour output and can produce substantially larger files.
@@ -112,7 +114,7 @@ python3 tools/convert.py input.mp4 \
     --preprocess-quality 35
 ```
 
-Use `--palette-quality` to trade colour accuracy for a smaller palette, and `--preprocess-quality` to trade fine image detail for smoother frames and potentially better temporal compression.
+Use `--palette-quality` to trade colour accuracy for a smaller palette, and `--preprocess-quality` to trade fine image detail for smoother frames and potentially better temporal compression. The hybrid palette tries to keep a few important colours even at very small palette budgets, but because anchors are drawn from sampled video colours it cannot guarantee a specific exact RGB565 colour.
 
 ### Additional options
 
