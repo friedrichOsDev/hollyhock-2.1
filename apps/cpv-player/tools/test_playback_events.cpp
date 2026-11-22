@@ -34,6 +34,34 @@ int main() {
           CPV::EventStepsForFrameDuration(250, 4, 0) == 1,
           "invalid FPS metadata falls back to one event");
 
+    Check(CPV::EventStepsForFrameDuration(0xFFFFFFFFU, 30, 1) ==
+              128849019U,
+          "large valid duration converts without 64-bit runtime arithmetic");
+
+    const CPV::UInt64Pair twoTo32 = {1U, 0U};
+    Check(CPV::DivideU64PairByU32Saturating(twoTo32, 2U) ==
+              0x80000000U,
+          "pair division handles a quotient at the signed boundary");
+
+    const CPV::UInt64Pair twoTo33 = {2U, 0U};
+    Check(CPV::DivideU64PairByU32Saturating(twoTo33, 1U) ==
+              0xFFFFFFFFU,
+          "pair division saturates a quotient wider than 32 bits");
+
+    const CPV::UInt64Pair ordinary = {0U, 123456789U};
+    Check(CPV::DivideU64PairByU32Saturating(ordinary, 1000U) == 123456U,
+          "pair division computes an ordinary quotient");
+
+    const CPV::UInt64Pair carryCase = {0x80000000U, 0U};
+    Check(CPV::DivideU64PairByU32Saturating(carryCase, 0xFFFFFFFFU) ==
+              0x80000000U,
+          "pair division handles a high-bit remainder without overflow");
+
+    const CPV::UInt64Pair product =
+        CPV::MultiplyU32ByU16(0xFFFFFFFFU, 30U);
+    Check(product.high == 29U && product.low == 0xFFFFFFE2U,
+          "32-by-16 multiplication returns exact high and low words");
+
     uint32_t remaining = 3;
     Check(CPV::ConsumePlaybackEventStep(&remaining, false, false) &&
           remaining == 2,
