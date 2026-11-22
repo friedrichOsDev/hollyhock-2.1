@@ -26,7 +26,7 @@ python3 -c "import lz4.block; print('LZ4 available')"  # optional
 python3 -m tkinter
 ```
 
-The converter uses NumPy to accelerate RGB565 conversion, palette lookup, bit-packing, delta analysis, and packet preparation. The palette reproduces the old project's 36-colour seed image (12 hues in dark, normal and light variants) and feeds it to FFmpeg as a real palette-generation input. FFmpeg's quantiser selects the remaining colours from the video. The converter compares LZ4 high-compression with zlib DEFLATE (which uses Huffman coding) per frame and selects the smaller result. CPV v1.3 can also store a small global-motion vector when it makes a P-frame smaller. LZ4 is optional; DEFLATE is available from Python's standard library.
+The converter uses NumPy to accelerate RGB565 conversion, palette lookup, bit-packing, delta analysis, and packet preparation. The palette reproduces the old project's 36-colour seed image (12 hues in dark, normal and light variants) and feeds it to FFmpeg as a real palette-generation input. FFmpeg's quantiser selects the remaining colours from the FPS-reduced and scaled video before denoising, matching the legacy palette path. For encoding, hqdn3d is applied after FPS reduction and scaling. The converter compares LZ4 high-compression with zlib DEFLATE (which uses Huffman coding) per frame and selects the smaller result. CPV v1.3 can also store a small global-motion vector when it makes a P-frame smaller. LZ4 is optional; DEFLATE is available from Python's standard library.
 
 ## Convert a video
 
@@ -89,7 +89,7 @@ The first 36 palette entries always use the legacy seed order. Palette quality 1
 
 #### Pre-processing quality
 
-`--preprocess-quality` controls FFmpeg's `hqdn3d` spatial and temporal denoising filter. It runs after scaling and before output frame-rate reduction. The same filter is applied when generating the global palette and when reading frames for encoding.
+`--preprocess-quality` controls FFmpeg's `hqdn3d` spatial and temporal denoising filter. It runs after output frame-rate reduction and scaling, matching the original converter. The palette is generated before hqdn3d, matching the original converter; hqdn3d is applied to the actual frames after FPS reduction and scaling.
 
 | Pre-process quality | Behaviour |
 |---:|---|
