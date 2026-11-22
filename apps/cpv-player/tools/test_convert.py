@@ -85,7 +85,7 @@ class GlobalMotionTests(unittest.TestCase):
     def test_shift_frame_moves_pixels_and_fills_edges(self):
         import numpy as np
         previous = np.arange(20 * 16, dtype=np.uint16)
-        shifted = convert.shift_frame(previous, 20, 16, 3, -2, 0x1234)
+        shifted = convert.shift_frame(previous, 20, 16, 3, 2, 0x1234)
         image = shifted.reshape(16, 20)
         source = previous.reshape(16, 20)
         self.assertTrue(np.all(image[:2, :] == 0x1234))
