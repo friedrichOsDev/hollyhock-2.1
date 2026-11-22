@@ -102,6 +102,60 @@ class GlobalMotionTests(unittest.TestCase):
             (3, -2),
         )
 
+class GlobalMotionDecoderTests(unittest.TestCase):
+    def test_motion_p_frame_decodes_to_exact_reference(self):
+        import numpy as np
+        palette = convert.build_legacy_seed_palette()
+        rng = np.random.default_rng(17)
+        previous_indices = rng.integers(0, len(palette), size=20 * 16, dtype=np.uint8)
+        previous = palette[previous_indices]
+        dx, dy = 3, -2
+        fill_colour = int(palette[0])
+        current = convert.shift_frame(previous, 20, 16, dx, dy, fill_colour)
+        predicted = convert.shift_frame(previous, 20, 16, dx, dy, fill_colour)
+        lookup = convert.build_rgb565_lookup(palette)
+        indices = lookup[current]
+        raw_mask = np.zeros(current.size, dtype=np.bool_)
+        packet_stream, _ = convert.encode_frame_payload(
+            indices, current, raw_mask, predicted, convert.FRAME_P,
+            convert.bits_per_index(len(palette)), True,
+        )
+        payload = convert.MOTION_HEADER.pack(dx, dy, fill_colour) + packet_stream
+
+        with tempfile.TemporaryDirectory(prefix="cpv_motion_decode_") as temp:
+            path = Path(temp) / "frame.bin"
+            path.write_bytes(payload)
+            reader = object.__new__(play.CPVFile)
+            reader.width = 20
+            reader.height = 16
+            reader.version_minor = 3
+            reader.palette_count = len(palette)
+            reader.index_bits = convert.bits_per_index(len(palette))
+            reader.palette = palette
+            reader.file_size = path.stat().st_size
+            reader.stream = path.open("rb")
+            reader.last_decoded_frame = 0
+            record = play.FrameRecord(
+                number=1, frame_type=play.FRAME_P, duration_ms=200,
+                flags=play.FRAME_FLAG_GLOBAL_MOTION, payload_size=len(payload),
+                file_offset=0, payload_offset=0, start_ms=200,
+            )
+            reader.frames = [
+                play.FrameRecord(
+                    number=0, frame_type=play.FRAME_I, duration_ms=200,
+                    flags=0, payload_size=0, file_offset=0,
+                    payload_offset=0, start_ms=0,
+                ),
+                record,
+            ]
+            framebuffer = previous.copy()
+            try:
+                reader.decode_frame(1, framebuffer)
+                np.testing.assert_array_equal(framebuffer, current)
+            finally:
+                reader.close()
+
+
 class CompressionDecoderTests(unittest.TestCase):
     def test_deflate_decoder_payload(self):
         import zlib
@@ -182,7 +236,7 @@ class IntegrationTests(unittest.TestCase):
             )
             cpv = play.CPVFile(output)
             try:
-                self.assertGreaterEqual(cpv.palette_count, 8)
+                self.assertGreaterEqual(cpv.palette_count, 36)
                 self.assertEqual(cpv.palette[:36].tolist(), convert.build_legacy_seed_palette().tolist())
                 framebuffer = np.zeros(cpv.width * cpv.height, dtype=np.uint16)
                 for frame_number in range(cpv.frame_count):
