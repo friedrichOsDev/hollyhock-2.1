@@ -431,13 +431,18 @@ def build_global_palette(
     extract = [
         ffmpeg, "-hide_banner", "-loglevel", "error",
         "-i", str(palette_path), "-frames:v", "1",
-        "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1",
+        "-f", "rawvideo", "-pix_fmt", "rgba", "pipe:1",
     ]
     raw = _run_checked(extract, "palette extraction").stdout
-    if not raw or len(raw) % 3:
-        raise ConversionError("FFmpeg returned an invalid palette image")
+    if not raw or len(raw) % 4:
+        raise ConversionError("FFmpeg returned an invalid RGBA palette image")
 
-    rgb = np.frombuffer(raw, dtype=np.uint8).reshape(-1, 3).astype(np.uint16)
+    rgba = np.frombuffer(raw, dtype=np.uint8).reshape(-1, 4)
+    # palettegen emits transparent padding up to the 16x16 palette canvas.
+    # Ignore it rather than accidentally adding transparent black as a colour.
+    rgb = rgba[rgba[:, 3] != 0, :3].astype(np.uint16)
+    if rgb.size == 0:
+        raise ConversionError("FFmpeg generated an empty palette")
     red = (rgb[:, 0] * 31 + 127) // 255
     green = (rgb[:, 1] * 63 + 127) // 255
     blue = (rgb[:, 2] * 31 + 127) // 255
@@ -1208,7 +1213,7 @@ def convert(args: argparse.Namespace) -> None:
             f"  Stored frames: {stored_frame_count}\n"
             f"  Keyframes: {len(index_entries)}\n"
             f"  Duration: {seconds:.3f} s\n"
-            f"  Palette: {palette.size} colours (8 fixed primary colours + adaptive video colours)\n"
+            f"  Palette: {palette.size} colours (36 legacy seed colours + adaptive video colours)\n"
             f"  Palette quality: {args.palette_quality}/100\n"
             f"  Pre-process quality: {args.preprocess_quality}/100\n"
             f"  Palette index width: {bits_per_index(int(palette.size))} bits\n"
