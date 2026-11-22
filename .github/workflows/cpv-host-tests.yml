@@ -1,4 +1,4 @@
-name: CPV host and legacy converter tests
+name: CPV native encoder and host player tests
 
 on:
   push:
@@ -19,26 +19,20 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install host dependencies
+      - name: Install native and host dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg
+          sudo apt-get install -y ffmpeg zlib1g-dev liblz4-dev python3-tk
           python -m pip install --upgrade pip
           python -m pip install numpy lz4
-      - name: Syntax check
+      - name: Build native encoder
+        run: make -C apps/cpv-player/tools
+      - name: Native encoder self-tests
+        run: apps/cpv-player/tools/cpv_convert --self-test
+      - name: Host decoder and encoder integration tests
         run: |
-          python -m py_compile apps/cpv-player/tools/convert.py apps/cpv-player/tools/play.py apps/cpv-player/tools/test_convert.py
-          python -m py_compile apps/cpv-player/tools/legacy_converter/convert.py apps/cpv-player/tools/legacy_converter/test_legacy.py
-      - name: Converter unit tests
-        run: python -m unittest discover -s apps/cpv-player/tools -p 'test_*.py' -v
-      - name: Legacy converter tests
-        run: python -m unittest discover -s apps/cpv-player/tools/legacy_converter -p 'test_*.py' -v
-      - name: Legacy converter CLI smoke test
-        run: python apps/cpv-player/tools/legacy_converter/convert.py --help
-      - name: CLI help smoke test
-        run: |
-          python apps/cpv-player/tools/convert.py --help
-          python apps/cpv-player/tools/play.py --help
+          python -m py_compile apps/cpv-player/tools/play.py apps/cpv-player/tools/test_encoder.py
+          python -m unittest discover -s apps/cpv-player/tools -p 'test_*.py' -v
       - name: Calculator global-motion helper test
         run: |
           g++ -std=c++11 -Wall -Wextra -Werror \
