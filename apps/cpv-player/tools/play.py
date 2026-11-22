@@ -215,9 +215,9 @@ class CPVFile:
             if frame_type not in (FRAME_I, FRAME_P):
                 raise CPVError(f"frame {number} has unknown type {frame_type}")
             if frame_flags & ~FRAME_FLAGS_MASK or frame_flags == FRAME_FLAGS_MASK:
+                raise CPVError(f"frame {number} has invalid flag bits 0x{frame_flags:02x}")
             if minor < 2 and frame_flags & FRAME_FLAG_DEFLATE:
                 raise CPVError(f"frame {number}: DEFLATE flag is only supported in CPV 1.2")
-                raise CPVError(f"frame {number} has unknown flag bits 0x{frame_flags:02x}")
             if minor == 0 and frame_flags != 0:
                 raise CPVError(f"CPV 1.0 frame {number} must have zero flags")
             if frame_header_size != FRAME_HEADER.size:
