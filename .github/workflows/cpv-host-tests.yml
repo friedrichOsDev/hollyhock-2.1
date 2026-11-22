@@ -28,8 +28,13 @@ jobs:
       - name: Syntax check
         run: |
           python -m py_compile apps/cpv-player/tools/convert.py apps/cpv-player/tools/play.py apps/cpv-player/tools/test_convert.py
+          python -m py_compile apps/cpv-player/tools/legacy_converter/convert.py apps/cpv-player/tools/legacy_converter/test_legacy.py
       - name: Converter unit tests
         run: python -m unittest discover -s apps/cpv-player/tools -p 'test_*.py' -v
+      - name: Legacy converter tests
+        run: python -m unittest discover -s apps/cpv-player/tools/legacy_converter -p 'test_*.py' -v
+      - name: Legacy converter CLI smoke test
+        run: python apps/cpv-player/tools/legacy_converter/convert.py --help
       - name: CLI help smoke test
         run: |
           python apps/cpv-player/tools/convert.py --help
