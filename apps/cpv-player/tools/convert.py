@@ -165,10 +165,12 @@ def hqdn3d_filter(preprocess_quality: int) -> Optional[str]:
         return None
 
     strength = preprocess_quality / 100.0
-    luma_spatial = 0.5 + 3.5 * strength
-    chroma_spatial = 0.75 + 5.25 * strength
-    luma_temporal = 1.0 + 5.0 * strength
-    chroma_temporal = 1.5 + 7.5 * strength
+    # At 100, match the exact default strengths used by the legacy tool's
+    # bare "hqdn3d" filter: 4.0, 3.0, 6.0, and 4.5.
+    luma_spatial = 4.0 * strength
+    chroma_spatial = 3.0 * strength
+    luma_temporal = 6.0 * strength
+    chroma_temporal = 4.5 * strength
     values = (
         luma_spatial,
         chroma_spatial,
