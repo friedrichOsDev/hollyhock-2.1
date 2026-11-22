@@ -838,6 +838,8 @@ The exact palette-size mapping, colour-distance thresholds, sampling policy, and
 
 The normal calculator profile SHOULD prioritise palette-coded data and exact SKIP detection. RAW565 SHOULD be used selectively.
 
+### 14.1 Fixed base palette and adaptive colours
+
 CPV v1.2 encoders SHOULD reserve the first eight palette entries, in this order, for RGB565 primary colours:
 - 0: red (0xF800)
 - 1: green (0x07E0)
@@ -851,7 +853,7 @@ CPV v1.2 encoders SHOULD reserve the first eight palette entries, in this order,
 These entries guarantee that the basic colour gamut is represented even when palette budgets are small. Remaining entries SHOULD be selected adaptively from the complete preprocessed video. Duplicate colours MUST be removed without changing the order of the reserved entries. Quality profiles MUST use at least eight colours.
 
 
-### 14.1 Denoising
+### 14.2 Denoising
 
 Optional spatial or temporal denoising MAY be applied before palette mapping.
 
@@ -859,7 +861,7 @@ Denoising can substantially reduce the number of distinct colours and small fram
 
 Temporal denoising MUST NOT alter the semantics of SKIP. SKIP remains an exact comparison of reconstructed pixel values.
 
-### 14.2 Dithering
+### 14.3 Dithering
 
 Spatial dithering MAY be applied during palette mapping.
 
