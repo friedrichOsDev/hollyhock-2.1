@@ -82,6 +82,44 @@ int main() {
           remaining == 0,
           "a zero countdown cannot underflow");
 
+    CPV::EventPlaybackClock clock;
+    Check(clock.Configure(20U,10U),"20 timer events over 10 seconds configure");
+    clock.ResetFrame(250U); clock.AddTimerEvent(); unsigned frames=0;
+    while(clock.FrameDue() && frames<8U) {
+        Check(clock.ConsumeCurrentFrame(),"clock consumes due frame");
+        ++frames; clock.SetNextFrameDuration(250U);
+    }
+    Check(frames==2U && clock.Credit()==0U,
+          "2 events/s schedule 2 frames/event at 4 FPS");
+    Check(clock.Configure(25U,10U),"fractional timer rate configures");
+    clock.ResetFrame(250U);
+    const uint32_t expected[5]={1U,2U,1U,2U,2U}; bool fractional=true;
+    for(unsigned tick=0;tick<5U;++tick) {
+        clock.AddTimerEvent(); frames=0;
+        while(clock.FrameDue() && frames<8U) {
+            if(!clock.ConsumeCurrentFrame()){fractional=false;break;}
+            ++frames; clock.SetNextFrameDuration(250U);
+        }
+        if(frames!=expected[tick]) fractional=false;
+    }
+    Check(fractional,"fractional frame/event ratio has no accumulated rounding drift");
+    Check(clock.Configure(40U,10U),"4 events/s calibration configures");
+    clock.ResetFrame(250U); clock.AddTimerEvent(); frames=0;
+    while(clock.FrameDue() && frames<8U) {
+        clock.ConsumeCurrentFrame(); ++frames; clock.SetNextFrameDuration(250U);
+    }
+    Check(frames==1U,"4 events/s schedules one 250 ms frame per event");
+    Check(clock.Configure(20U,10U),"coalesced-frame calibration configures");
+    clock.ResetFrame(750U); clock.AddTimerEvent();
+    Check(!clock.FrameDue(),"750 ms frame is not advanced early");
+    clock.AddTimerEvent();
+    Check(clock.FrameDue() && clock.ConsumeCurrentFrame(),
+          "750 ms frame advances only after full media duration");
+    Check(clock.Credit()==5000U,"coalesced frame preserves fractional credit");
+    clock.ResetFrame(250U);
+    Check(clock.Credit()==0U,"seek reset discards previous fractional credit");
+    Check(!clock.Configure(0U,10U) && !clock.Configure(20U,0U) &&
+          !clock.Configure(20U,61U),"invalid calibration values are rejected");
     printf("\n%u checks, %u failure(s)\n", checks, failures);
     return failures == 0 ? 0 : 1;
 }
