@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import zlib
 from dataclasses import dataclass
 from fractions import Fraction
 from pathlib import Path
@@ -29,7 +30,7 @@ except ImportError:
 
 MAGIC = b"CPV\0"
 VERSION_MAJOR = 1
-VERSION_MINOR = 1
+VERSION_MINOR = 2
 
 # CPV v1.1: 64-byte file header, 20-byte frame header, 12-byte index entry.
 HEADER = struct.Struct("<4sBBHIHHHHIHHIIII20s")
@@ -43,6 +44,8 @@ MAX_FPS = 30
 MAX_RUN_LENGTH = 8191
 MAX_DELTA_MASK_LENGTH = 65535
 FRAME_FLAG_LZ4 = 0x01
+FRAME_FLAG_DEFLATE = 0x02
+FRAME_FLAGS_MASK = FRAME_FLAG_LZ4 | FRAME_FLAG_DEFLATE
 
 FRAME_I = 0
 FRAME_P = 1
@@ -200,9 +203,7 @@ def make_filter(
 
 
 def palette_limit_for_palette_quality(palette_quality: int) -> int:
-    """Map quality to a compact palette budget, with useful low-quality steps."""
-    if palette_quality < 5:
-        return 4
+    """Map quality to an 8-colour minimum palette budget."""
     if palette_quality < 10:
         return 8
     if palette_quality < 25:
@@ -216,10 +217,31 @@ def palette_limit_for_palette_quality(palette_quality: int) -> int:
     return 256
 
 
-# Hybrid palette anchors: target colours are represented by colours actually
-# sampled from the preprocessed video, so anchors cannot introduce off-video RGB.
-ANCHOR_TARGETS = (0x0000, 0xFFFF, 0x8410, 0xFBE0, 0xF800, 0x07E0, 0x001F, 0x07FF, 0xFFE0)
+# These first eight RGB565 slots are guaranteed in every CPV v1.2 palette.
+# Order is deliberate and stable for inspection/debugging.
+FIXED_BASE_PALETTE = (
+    0xF800,  # red
+    0x07E0,  # green
+    0x001F,  # blue
+    0xFFE0,  # yellow
+    0x07FF,  # cyan
+    0xF81F,  # magenta
+    0x0000,  # black
+    0xFFFF,  # white
+)
 
+
+def merge_hybrid_palette(generated, palette_budget: int):
+    """Keep eight fixed primary colours first, then append video-derived colours."""
+    require_numpy()
+    if palette_budget < len(FIXED_BASE_PALETTE) or palette_budget > 256:
+        raise ValueError("palette budget must be in the range 8..256")
+    base = np.asarray(FIXED_BASE_PALETTE, dtype=np.uint16)
+    generated = np.asarray(generated, dtype=np.uint16).reshape(-1)
+    merged = np.concatenate((base, generated))
+    _, first_indices = np.unique(merged, return_index=True)
+    ordered_unique = merged[np.sort(first_indices)]
+    return np.ascontiguousarray(ordered_unique[:palette_budget], dtype=np.uint16)
 
 def _run_checked(command: list[str], description: str) -> subprocess.CompletedProcess[bytes]:
     try:
@@ -301,23 +323,16 @@ def build_global_palette(
     preprocess_quality: int,
     temp_dir: Path,
 ):
-    """Build a hybrid palette: selected video colours plus FFmpeg quantisation."""
+    """Build a hybrid global palette with eight guaranteed base colours."""
     require_numpy()
     max_colours = palette_limit_for_palette_quality(palette_quality)
     palette_path = temp_dir / "palette.png"
-
-    sampled_colours, sampled_counts = _sample_video_histogram(
-        ffmpeg, source, width, height, fit, background, preprocess_quality
-    )
-    anchors = select_hybrid_anchors(sampled_colours, sampled_counts, max_colours)
-    remaining_budget = max(2, max_colours - int(anchors.size))
-
     sample_filter = make_filter(
         width, height, Fraction(1, 1), fit, background, preprocess_quality
     )
     video_filter = (
         sample_filter
-        + f",palettegen=max_colors={remaining_budget}:stats_mode=full:reserve_transparent=0"
+        + f",palettegen=max_colors={max_colours}:stats_mode=full:reserve_transparent=0"
     )
     command = [
         ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
@@ -340,13 +355,11 @@ def build_global_palette(
     green = (rgb[:, 1] * 63 + 127) // 255
     blue = (rgb[:, 2] * 31 + 127) // 255
     generated = ((red << 11) | (green << 5) | blue).astype(np.uint16)
-
-    merged = np.concatenate((anchors, generated))
-    _, first_indices = np.unique(merged, return_index=True)
-    palette = np.ascontiguousarray(merged[np.sort(first_indices)][:max_colours], dtype=np.uint16)
-    if palette.size == 0 or palette.size > max_colours:
+    palette = merge_hybrid_palette(generated, max_colours)
+    if palette.size < len(FIXED_BASE_PALETTE) or palette.size > max_colours:
         raise ConversionError(f"invalid hybrid global palette size: {palette.size}")
     return palette, max_colours
+
 def build_rgb565_lookup(palette):
     """Build one 65,536-entry lookup table, avoiding a 256-colour search per pixel."""
     require_numpy()
@@ -715,21 +728,28 @@ def encode_frame_payload(indices, reconstructed, raw_mask, previous,
 
 
 def compress_frame_payload(payload: bytes, enabled: bool) -> tuple[bytes, int, int]:
-    """Compress one independent frame packet stream with a raw LZ4 block."""
+    """Choose the smaller independent LZ4-HC or DEFLATE/Huffman frame stream."""
     if not enabled:
         return payload, 0, 0
     require_lz4()
-    # High-compression mode spends desktop CPU to reduce calculator storage.
-    compressed = lz4_block.compress(
+
+    decoded_size_prefix = struct.pack("<I", len(payload))
+    lz4_data = lz4_block.compress(
         payload, mode="high_compression", compression=9, store_size=False
     )
-    stored = struct.pack("<I", len(payload)) + compressed
+    lz4_stored = decoded_size_prefix + lz4_data
+    deflate_stored = decoded_size_prefix + zlib.compress(payload, level=9)
+
+    candidates = (
+        (len(lz4_stored), lz4_stored, FRAME_FLAG_LZ4),
+        (len(deflate_stored), deflate_stored, FRAME_FLAG_DEFLATE),
+    )
+    _, stored, selected_flag = min(candidates, key=lambda item: item[0])
     saving = len(payload) - len(stored)
     minimum_saving = max(16, len(payload) // 100)
     if saving < minimum_saving:
         return payload, 0, 0
-    return stored, FRAME_FLAG_LZ4, saving
-
+    return stored, selected_flag, saving
 
 def read_exact(stream: BinaryIO, size: int) -> Optional[bytes]:
     chunks = bytearray()
@@ -762,7 +782,7 @@ def write_frame_record(
 ) -> int:
     if not (1 <= duration_ms <= 0xFFFFFFFF):
         raise ConversionError("frame duration must fit in a non-zero uint32")
-    if flags & ~FRAME_FLAG_LZ4:
+    if flags & ~FRAME_FLAGS_MASK or flags == FRAME_FLAGS_MASK:
         raise ConversionError("attempted to write unknown frame flags")
     if len(payload) > 0xFFFFFFFF:
         raise ConversionError("frame payload exceeds the CPV uint32 limit")
@@ -778,7 +798,7 @@ def write_frame_record(
 
 def convert(args: argparse.Namespace) -> None:
     require_numpy()
-    if not args.no_lz4:
+    if not args.no_frame_compression:
         require_lz4()
     source = Path(args.input).expanduser().resolve()
     output_path = Path(args.output).expanduser().resolve()
@@ -817,8 +837,9 @@ def convert(args: argparse.Namespace) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     conversion_started = time.monotonic()
     total_packet_stats = PacketStats.create()
-    total_compressed_frames = 0
-    total_lz4_savings = 0
+    total_lz4_frames = 0
+    total_deflate_frames = 0
+    total_compression_savings = 0
     index_entries: list[tuple[int, int, int]] = []
     process: Optional[subprocess.Popen[bytes]] = None
     stderr_file = tempfile.TemporaryFile(mode="w+b")
@@ -919,11 +940,14 @@ def convert(args: argparse.Namespace) -> None:
                             not args.no_delta_mask,
                         )
                         stored_payload, frame_flags, frame_saving = compress_frame_payload(
-                            payload, not args.no_lz4
+                            payload, not args.no_frame_compression
                         )
-                        if frame_flags & FRAME_FLAG_LZ4:
-                            total_compressed_frames += 1
-                            total_lz4_savings += frame_saving
+                        if frame_flags == FRAME_FLAG_LZ4:
+                            total_lz4_frames += 1
+                            total_compression_savings += frame_saving
+                        elif frame_flags == FRAME_FLAG_DEFLATE:
+                            total_deflate_frames += 1
+                            total_compression_savings += frame_saving
                         frame_offset = write_frame_record(
                             output,
                             stored_payload,
@@ -1065,7 +1089,7 @@ def convert(args: argparse.Namespace) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Convert an FFmpeg-readable video into the CPV v1.1 format."
+        description="Convert an FFmpeg-readable video into the CPV v1.2 format."
     )
     parser.add_argument("input", help="input video file supported by FFmpeg")
     parser.add_argument("--output", required=True, help="output .cpv file")
@@ -1077,7 +1101,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--palette-quality", type=int, choices=range(0, 101), default=75,
-        help="palette budget: 0 (4 colours) to 100 (256 colours + RAW565 fallback; default: 75)",
+        help="palette budget: 0 (8 fixed + adaptive colours) to 100 (256 colours + RAW565 fallback; default: 75)",
     )
     parser.add_argument(
         "--preprocess-quality", type=int, choices=range(0, 101), default=0,
@@ -1088,8 +1112,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="disable mixed SKIP/data delta-mask packets (useful for size comparisons)",
     )
     parser.add_argument(
-        "--no-lz4", action="store_true",
-        help="disable per-frame LZ4 block compression (useful for size comparisons)",
+        "--no-frame-compression", "--no-lz4", dest="no_frame_compression",
+        action="store_true",
+        help="disable per-frame LZ4-HC and DEFLATE/Huffman compression (benchmarking only)",
     )
     parser.add_argument(
         "--keyframe-interval", type=float, default=2.0,
