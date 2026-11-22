@@ -26,20 +26,22 @@ PLAY_SPEC.loader.exec_module(play)
 
 class PaletteTests(unittest.TestCase):
     def test_palette_quality_budget(self):
-        cases = [(0, 8), (4, 8), (5, 8), (9, 8), (10, 16), (24, 16),
-                 (25, 32), (39, 32), (40, 64), (59, 64), (60, 128),
-                 (79, 128), (80, 256), (99, 256), (100, 256)]
+        cases = [(0, 36), (4, 36), (39, 36), (40, 64), (59, 64),
+                 (60, 128), (79, 128), (80, 256), (99, 256), (100, 256)]
         for quality, expected in cases:
             with self.subTest(quality=quality):
                 self.assertEqual(convert.palette_limit_for_palette_quality(quality), expected)
 
-    def test_palette_contains_fixed_base_colours_first(self):
+    def test_legacy_seed_palette_is_exact_and_first(self):
         import numpy as np
-        generated = np.array([0x1234, 0xF800, 0x07E0], dtype=np.uint16)
-        palette = convert.merge_hybrid_palette(generated, 16)
-        self.assertEqual(palette[:8].tolist(), list(convert.FIXED_BASE_PALETTE))
+        seed_rgb = convert.build_legacy_seed_rgb24()
+        seed_palette = convert.build_legacy_seed_palette()
+        generated = np.array([0x1234, int(seed_palette[0])], dtype=np.uint16)
+        palette = convert.merge_legacy_seed_palette(generated, 64)
+        self.assertEqual(len(seed_rgb), 36 * 3)
+        self.assertEqual(palette[:36].tolist(), seed_palette.tolist())
         self.assertIn(0x1234, palette.tolist())
-        self.assertLessEqual(palette.size, 16)
+        self.assertLessEqual(palette.size, 64)
 
 
 
@@ -78,6 +80,27 @@ class PackingTests(unittest.TestCase):
         self.assertEqual(decoded_size, len(payload))
         self.assertEqual(decoded, payload)
 
+
+class GlobalMotionTests(unittest.TestCase):
+    def test_shift_frame_moves_pixels_and_fills_edges(self):
+        import numpy as np
+        previous = np.arange(20 * 16, dtype=np.uint16)
+        shifted = convert.shift_frame(previous, 20, 16, 3, -2, 0x1234)
+        image = shifted.reshape(16, 20)
+        source = previous.reshape(16, 20)
+        self.assertTrue(np.all(image[:2, :] == 0x1234))
+        self.assertTrue(np.all(image[2:, :3] == 0x1234))
+        np.testing.assert_array_equal(image[2:, 3:], source[:-2, :-3])
+
+    def test_motion_estimator_finds_translation(self):
+        import numpy as np
+        rng = np.random.default_rng(1234)
+        previous = rng.integers(0, 65536, size=20 * 16, dtype=np.uint16)
+        current = convert.shift_frame(previous, 20, 16, 3, -2, 0xFFFF)
+        self.assertEqual(
+            convert.estimate_global_motion(current, previous, 20, 16),
+            (3, -2),
+        )
 
 class CompressionDecoderTests(unittest.TestCase):
     def test_deflate_decoder_payload(self):
@@ -160,7 +183,7 @@ class IntegrationTests(unittest.TestCase):
             cpv = play.CPVFile(output)
             try:
                 self.assertGreaterEqual(cpv.palette_count, 8)
-                self.assertEqual(cpv.palette[:8].tolist(), list(convert.FIXED_BASE_PALETTE))
+                self.assertEqual(cpv.palette[:36].tolist(), convert.build_legacy_seed_palette().tolist())
                 framebuffer = np.zeros(cpv.width * cpv.height, dtype=np.uint16)
                 for frame_number in range(cpv.frame_count):
                     cpv.decode_frame(frame_number, framebuffer)
