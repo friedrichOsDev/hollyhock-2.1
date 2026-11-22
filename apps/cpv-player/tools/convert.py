@@ -733,8 +733,9 @@ def compress_frame_payload(payload: bytes, enabled: bool) -> tuple[bytes, int, i
         return payload, 0, 0
 
     prefix = struct.pack("<I", len(payload))
+    deflate_data = zlib.compress(payload, level=9)
     candidates: list[tuple[int, bytes, int]] = [
-        (len(prefix) + len(zlib.compress(payload, level=9)), prefix + zlib.compress(payload, level=9), FRAME_FLAG_DEFLATE)
+        (len(prefix) + len(deflate_data), prefix + deflate_data, FRAME_FLAG_DEFLATE)
     ]
     if lz4_block is not None:
         lz4_data = lz4_block.compress(
