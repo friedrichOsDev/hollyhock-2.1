@@ -150,7 +150,7 @@ Controls:
 - **Home**: jump to the beginning.
 - **End**: jump to the end.
 
-The preview player requires a working graphical desktop session and Tkinter. It is a host-side reference decoder. The calculator-side decoding implementation must mirror the global-motion operation before v1.3 motion frames can be played on-device.
+The preview player requires a working graphical desktop session and Tkinter. It is a host-side reference decoder. The calculator-side decoding implementation must mirror the global-motion operation before v1.3 motion frames can be played on-device. A no-allocation in-place C++ helper is provided in `cpv_motion.hpp` and tested by `tools/test_motion.cpp`; it is not yet wired into the calculator playback loop.
 
 ## CPV v1 format
 
