@@ -89,8 +89,8 @@ class CompressionDecoderTests(unittest.TestCase):
             path = Path(temp) / "frame.bin"
             path.write_bytes(record_payload)
             reader = object.__new__(play.CPVFile)
-            reader.width = 32
-            reader.height = 24
+            reader.width = 100
+            reader.height = 100
             reader.version_minor = 2
             reader.file_size = path.stat().st_size
             reader.stream = path.open("rb")
