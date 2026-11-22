@@ -6,7 +6,7 @@ A Hollyhock 2.1 application for playing CPV v1.2 video files on the Casio fx-CP4
 
 - Python 3.10 or newer.
 - NumPy.
-- `lz4` Python package (`python-lz4` on Arch/CachyOS) for the default per-frame compression.
+- Optional `lz4` Python package (`python-lz4` on Arch/CachyOS); DEFLATE is built into Python.
 - FFmpeg and FFprobe.
 - Tkinter for the desktop preview player.
 
@@ -21,7 +21,8 @@ On other Linux distributions, install NumPy, FFmpeg, FFprobe, and the Python Tki
 Verify the Python modules:
 
 ```bash
-python3 -c "import numpy, lz4.block; print(numpy.__version__, lz4.__version__)"
+python3 -c "import numpy; print(numpy.__version__)"
+python3 -c "import lz4.block; print('LZ4 available')"  # optional
 python3 -m tkinter
 ```
 
