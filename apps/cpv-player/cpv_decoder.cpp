@@ -565,13 +565,13 @@ bool Decoder::ValidatePackedPadding(const uint8_t *data, uint32_t dataSize,
 }
 
 bool Decoder::DecodeFrameAt(uint32_t offset, const FrameHeader &header) {
-    SetOperation("READ FRAME PAYLOAD");
     m_lastStoredFrameBytes = 0;
     m_lastDecodedFrameBytes = 0;
     m_lastPacketCount = 0;
     m_lastCompression = header.flags & kFrameCompressionMask;
     for (unsigned i = 0; i < 5; ++i)
         m_lastPacketTypes[i] = 0;
+    SetOperation("READ FRAME PAYLOAD");
     if (header.payloadSize > m_storedCapacity ||
         !ReadAt(offset + kFrameHeaderSize, m_storedBuffer,
                 header.payloadSize))

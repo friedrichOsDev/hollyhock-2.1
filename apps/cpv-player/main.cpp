@@ -43,12 +43,17 @@ void AppendNumber(uint32_t value, char *out, unsigned capacity) {
     out[position] = 0;
 }
 
-void DrawNumber(UI::Framebuffer &screen, int y, const char *label,
-                uint32_t value) {
+void DrawNumberAt(UI::Framebuffer &screen, int x, int valueX, int y,
+                  const char *label, uint32_t value) {
     char text[32];
     AppendNumber(value, text, sizeof(text));
-    screen.DrawText(8, y, label, UI::Colors::Gray);
-    screen.DrawText(166, y, text, UI::Colors::White);
+    screen.DrawText(x, y, label, UI::Colors::Gray);
+    screen.DrawText(valueX, y, text, UI::Colors::White);
+}
+
+void DrawNumber(UI::Framebuffer &screen, int y, const char *label,
+                uint32_t value) {
+    DrawNumberAt(screen, 8, 166, y, label, value);
 }
 
 struct PlaybackState {
@@ -63,11 +68,18 @@ struct PlaybackState {
     const char *phase;
     uint32_t workCurrent;
     uint32_t workTotal;
+    uint16_t lastRawType;
+    uint16_t lastKeyCode;
+    uint32_t lastRawAction;
+    int32_t lastTouchX;
+    int32_t lastTouchY;
 
     PlaybackState()
         : paused(false), ended(false), exit(false), redraw(true),
           touchLatched(false), latchedKey(0), remainingMs(0),
-          lastInput("START"), phase("START"), workCurrent(0), workTotal(0) {}
+          lastInput("START"), phase("START"), workCurrent(0), workTotal(0),
+          lastRawType(0), lastKeyCode(0), lastRawAction(0),
+          lastTouchX(0), lastTouchY(0) {}
 };
 
 struct DebugContext {
@@ -101,33 +113,39 @@ void DrawDebugPage(UI::Framebuffer &screen, const CPV::Decoder &decoder,
     screen.DrawText(92, 38, state.paused ? "PAUSED" :
                     (state.ended ? "ENDED" : "PLAYING"),
                     state.paused ? UI::Colors::Yellow : UI::Colors::Green);
+    const uint8_t compression = decoder.LastCompression();
+    const char *codec = compression == 1 ? "LZ4" :
+                        compression == 2 ? "DEFLATE" : "RAW";
+    screen.DrawText(270, 38, "CODEC:", UI::Colors::Gray);
+    screen.DrawText(318, 38, codec, UI::Colors::White);
     screen.DrawText(8, 54, "INPUT:", UI::Colors::Gray);
     screen.DrawText(92, 54, state.lastInput ? state.lastInput : "NONE",
                     UI::Colors::White);
 
-    DrawNumber(screen, 74, "WORK CURRENT:", current);
-    DrawNumber(screen, 90, "WORK TOTAL:", total);
-    DrawNumber(screen, 106, "FRAME:",
-               decoder.HasFrame() ? decoder.CurrentFrame() + 1U : 0U);
-    DrawNumber(screen, 122, "FRAME COUNT:", decoder.FrameCount());
-    DrawNumber(screen, 138, "LAST READ BYTES:", decoder.LastReadBytes());
-    DrawNumber(screen, 154, "STORED FRAME BYTES:",
-               decoder.LastStoredFrameBytes());
-    DrawNumber(screen, 170, "DECODED FRAME BYTES:",
-               decoder.LastDecodedFrameBytes());
-    DrawNumber(screen, 186, "PACKET COUNT:", decoder.LastPacketCount());
-    DrawNumber(screen, 202, "INDEX_LITERAL:", decoder.PacketCount(0));
-    DrawNumber(screen, 218, "INDEX_REPEAT:", decoder.PacketCount(1));
-    DrawNumber(screen, 234, "SKIP:", decoder.PacketCount(2));
-    DrawNumber(screen, 250, "RAW565:", decoder.PacketCount(3));
-    DrawNumber(screen, 266, "DELTA_MASK:", decoder.PacketCount(4));
-    DrawNumber(screen, 282, "SEEK DECODED:", decoder.LastSeekFrames());
+    DrawNumberAt(screen, 8, 166, 70, "EVENT TYPE:", state.lastRawType);
+    DrawNumberAt(screen, 270, 402, 70, "RAW ACTION:", state.lastRawAction);
+    DrawNumberAt(screen, 8, 166, 86, "KEY CODE:", state.lastKeyCode);
+    DrawNumberAt(screen, 270, 402, 86, "TOUCH X:",
+                 static_cast<uint32_t>(state.lastTouchX));
+    DrawNumberAt(screen, 270, 402, 102, "TOUCH Y:",
+                 static_cast<uint32_t>(state.lastTouchY));
 
-    const uint8_t compression = decoder.LastCompression();
-    const char *codec = compression == 1 ? "LZ4" :
-                        compression == 2 ? "DEFLATE" : "RAW";
-    screen.DrawText(8, 298, "CODEC:", UI::Colors::Gray);
-    screen.DrawText(60, 298, codec, UI::Colors::White);
+    DrawNumber(screen, 102, "WORK CURRENT:", current);
+    DrawNumber(screen, 118, "WORK TOTAL:", total);
+    DrawNumber(screen, 134, "FRAME:",
+               decoder.HasFrame() ? decoder.CurrentFrame() + 1U : 0U);
+    DrawNumber(screen, 150, "LAST READ BYTES:", decoder.LastReadBytes());
+    DrawNumber(screen, 166, "STORED FRAME BYTES:",
+               decoder.LastStoredFrameBytes());
+    DrawNumber(screen, 182, "DECODED FRAME BYTES:",
+               decoder.LastDecodedFrameBytes());
+    DrawNumber(screen, 198, "PACKET COUNT:", decoder.LastPacketCount());
+    DrawNumber(screen, 214, "INDEX_LITERAL:", decoder.PacketCount(0));
+    DrawNumber(screen, 230, "INDEX_REPEAT:", decoder.PacketCount(1));
+    DrawNumber(screen, 246, "SKIP:", decoder.PacketCount(2));
+    DrawNumber(screen, 262, "RAW565:", decoder.PacketCount(3));
+    DrawNumber(screen, 278, "DELTA_MASK:", decoder.PacketCount(4));
+    DrawNumber(screen, 294, "SEEK DECODED:", decoder.LastSeekFrames());
     screen.Present();
 }
 
@@ -272,6 +290,12 @@ void TogglePlayback(PlaybackState &state, CPV::Decoder &decoder) {
 
 void HandleEvent(const UI::Event &event, CPV::Decoder &decoder,
                  PlaybackState &state, int screenWidth) {
+    state.lastRawType = event.rawType;
+    state.lastRawAction = event.rawAction;
+    state.lastKeyCode = event.keyCode;
+    state.lastTouchX = event.x;
+    state.lastTouchY = event.y;
+
     if (event.type == UI::EventSystem &&
         event.systemEvent == UI::SystemActionBarEscape) {
         state.exit = true;

@@ -14,7 +14,7 @@ Playback controls: **EXE** pauses/resumes, **Left/Right** seek by 5 seconds, **U
 
 ### Debug mode
 
-Enable **Debug mode** in the app settings before opening a video. Instead of displaying the video image, the screen displays a live text diagnostic view. It shows the current operation (file open, header/palette read, frame/index validation, payload read, DEFLATE/LZ4 decompression, global-motion prediction, packet decoding, seeking or frame completion), the current work counter, the current frame, read bytes, stored/decompressed frame sizes, packet counts by opcode, compression method and number of frames decoded during a seek.
+Enable **Debug mode** in the app settings before opening a video. Instead of displaying the video image, the screen displays a live text diagnostic view. It shows the current operation (file open, header/palette read, frame/index validation, payload read, DEFLATE/LZ4 decompression, global-motion prediction, packet decoding, seeking or frame completion), the current work counter, the current frame, read bytes, stored/decompressed frame sizes, packet counts by opcode, compression method, key/touch input codes, raw SDK event types/actions and touch coordinates, plus the number of frames decoded during a seek.
 
 The decoder reports phase changes before long operations and periodic progress while scanning frame/index records, reading large payloads, seeking and decoding packet streams. This helps distinguish time spent in file I/O, decompression, packet parsing and framebuffer output. The current SDK exposes no monotonic timer, so this debug view intentionally reports operation names and work counters rather than claiming unreliable millisecond measurements.
 
