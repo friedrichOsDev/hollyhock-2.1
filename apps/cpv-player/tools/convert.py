@@ -49,6 +49,7 @@ FRAME_FLAG_GLOBAL_MOTION = 0x04
 FRAME_COMPRESSION_MASK = FRAME_FLAG_LZ4 | FRAME_FLAG_DEFLATE
 FRAME_FLAGS_MASK = FRAME_COMPRESSION_MASK | FRAME_FLAG_GLOBAL_MOTION
 MAX_GLOBAL_MOTION = 8
+MOTION_HEADER = struct.Struct("<bbH")
 
 FRAME_I = 0
 FRAME_P = 1
@@ -296,7 +297,10 @@ def shift_frame(
     return shifted.reshape(-1)
 
 
-def _motion_match_count(current_2d, previous_2d, dx: int, dy: int, sample_step: int) -> int:
+def _motion_match_count(
+    current_2d, previous_2d, dx: int, dy: int, sample_step: int
+) -> int:
+    """Count exact RGB565 matches on the overlapping, regularly sampled area."""
     height, width = current_2d.shape
     sx0 = max(0, -dx)
     sy0 = max(0, -dy)
@@ -313,34 +317,54 @@ def _motion_match_count(current_2d, previous_2d, dx: int, dy: int, sample_step: 
 def estimate_global_motion(
     current, previous, width: int, height: int, max_shift: int = MAX_GLOBAL_MOTION
 ) -> tuple[int, int]:
-    """Estimate a small frame-wide translation using coarse-to-fine exact matching."""
+    """Estimate a small global translation using coarse-to-fine sampled matching."""
     current_2d = np.asarray(current, dtype=np.uint16).reshape(height, width)
     previous_2d = np.asarray(previous, dtype=np.uint16).reshape(height, width)
 
-    best_dx = 0
-    best_dy = 0
-    best_score = _motion_match_count(current_2d, previous_2d, 0, 0, 4)
-
+    # Coarse grid: at most roughly 17x10 samples at the calculator's target size.
+    coarse_step = max(4, max(width, height) // 32)
     coarse_candidates = range(-max_shift, max_shift + 1, 2)
+    coarse_dx = coarse_dy = 0
+    coarse_score = _motion_match_count(
+        current_2d, previous_2d, 0, 0, coarse_step
+    )
     for dy in coarse_candidates:
         for dx in coarse_candidates:
             if dx == 0 and dy == 0:
                 continue
-            score = _motion_match_count(current_2d, previous_2d, dx, dy, 4)
-            if score > best_score:
-                best_score, best_dx, best_dy = score, dx, dy
+            score = _motion_match_count(
+                current_2d, previous_2d, dx, dy, coarse_step
+            )
+            if score > coarse_score:
+                coarse_score, coarse_dx, coarse_dy = score, dx, dy
 
-    coarse_dx, coarse_dy = best_dx, best_dy
-    for dy in range(max(-max_shift, coarse_dy - 1), min(max_shift, coarse_dy + 1) + 1):
-        for dx in range(max(-max_shift, coarse_dx - 1), min(max_shift, coarse_dx + 1) + 1):
-            score = _motion_match_count(current_2d, previous_2d, dx, dy, 2)
+    # Refine the best coarse vector and compare against a zero-motion score
+    # measured on exactly the same sample grid.
+    fine_step = max(2, coarse_step // 2)
+    best_dx = best_dy = 0
+    zero_score = _motion_match_count(
+        current_2d, previous_2d, 0, 0, fine_step
+    )
+    best_score = zero_score
+    for dy in range(max(-max_shift, coarse_dy - 1),
+                    min(max_shift, coarse_dy + 1) + 1):
+        for dx in range(max(-max_shift, coarse_dx - 1),
+                        min(max_shift, coarse_dx + 1) + 1):
+            score = _motion_match_count(
+                current_2d, previous_2d, dx, dy, fine_step
+            )
             if score > best_score or (
-                score == best_score and abs(dx) + abs(dy) < abs(best_dx) + abs(best_dy)
+                score == best_score
+                and abs(dx) + abs(dy) < abs(best_dx) + abs(best_dy)
             ):
                 best_score, best_dx, best_dy = score, dx, dy
 
-    sample_count = ((height + 3) // 4) * ((width + 3) // 4)
-    if best_score - _motion_match_count(current_2d, previous_2d, 0, 0, 2) < max(4, sample_count // 100):
+    sample_count = ((height + fine_step - 1) // fine_step) * (
+        (width + fine_step - 1) // fine_step
+    )
+    if (best_dx == 0 and best_dy == 0) or (
+        best_score - zero_score < max(3, sample_count // 100)
+    ):
         return 0, 0
     return best_dx, best_dy
 
@@ -848,8 +872,9 @@ def write_frame_record(
 ) -> int:
     if not (1 <= duration_ms <= 0xFFFFFFFF):
         raise ConversionError("frame duration must fit in a non-zero uint32")
-    if flags & ~FRAME_FLAGS_MASK or flags == FRAME_FLAGS_MASK:
-        raise ConversionError("attempted to write unknown frame flags")
+    compression_flags = flags & FRAME_COMPRESSION_MASK
+    if flags & ~FRAME_FLAGS_MASK or compression_flags == FRAME_COMPRESSION_MASK:
+        raise ConversionError("attempted to write invalid frame flags")
     if len(payload) > 0xFFFFFFFF:
         raise ConversionError("frame payload exceeds the CPV uint32 limit")
     offset = output.tell()
@@ -906,6 +931,8 @@ def convert(args: argparse.Namespace) -> None:
     total_lz4_frames = 0
     total_deflate_frames = 0
     total_compression_savings = 0
+    total_motion_frames = 0
+    total_motion_bytes_saved = 0
     index_entries: list[tuple[int, int, int]] = []
     process: Optional[subprocess.Popen[bytes]] = None
     stderr_file = tempfile.TemporaryFile(mode="w+b")
@@ -996,22 +1023,77 @@ def convert(args: argparse.Namespace) -> None:
                             or start_ms - last_keyframe_start_ms >= keyframe_interval_ms
                         )
                         frame_type = FRAME_I if is_keyframe else FRAME_P
+                        bit_width = bits_per_index(int(palette.size))
                         payload, frame_stats = encode_frame_payload(
                             indices,
                             reconstructed,
                             raw_mask,
                             previous_reconstruction,
                             frame_type,
-                            bits_per_index(int(palette.size)),
+                            bit_width,
                             not args.no_delta_mask,
                         )
-                        stored_payload, frame_flags, frame_saving = compress_frame_payload(
+                        stored_payload, compression_flag, frame_saving = compress_frame_payload(
                             payload, not args.no_frame_compression
                         )
-                        if frame_flags == FRAME_FLAG_LZ4:
+                        frame_flags = compression_flag
+
+                        # For P-frames, try a small global translation of the previous
+                        # reconstructed image. Keep it only when the fully compressed
+                        # motion candidate beats the ordinary P-frame byte-for-byte.
+                        if (
+                            frame_type == FRAME_P
+                            and not args.no_global_motion
+                            and previous_reconstruction is not None
+                        ):
+                            dx, dy = estimate_global_motion(
+                                reconstructed, previous_reconstruction,
+                                args.width, args.height,
+                            )
+                            if dx != 0 or dy != 0:
+                                background_rgb = int(args.background, 16)
+                                fill_red = (background_rgb >> 16) & 0xFF
+                                fill_green = (background_rgb >> 8) & 0xFF
+                                fill_blue = background_rgb & 0xFF
+                                fill_colour = (
+                                    ((fill_red * 31 + 127) // 255) << 11
+                                    | ((fill_green * 63 + 127) // 255) << 5
+                                    | ((fill_blue * 31 + 127) // 255)
+                                )
+                                predicted = shift_frame(
+                                    previous_reconstruction, args.width, args.height,
+                                    dx, dy, fill_colour,
+                                )
+                                motion_packets, motion_stats = encode_frame_payload(
+                                    indices, reconstructed, raw_mask, predicted,
+                                    FRAME_P, bit_width, not args.no_delta_mask,
+                                )
+                                motion_stream = (
+                                    MOTION_HEADER.pack(dx, dy, fill_colour)
+                                    + motion_packets
+                                )
+                                motion_stored, motion_compression_flag, motion_saving = (
+                                    compress_frame_payload(
+                                        motion_stream, not args.no_frame_compression
+                                    )
+                                )
+                                if len(motion_stored) < len(stored_payload):
+                                    total_motion_frames += 1
+                                    total_motion_bytes_saved += (
+                                        len(stored_payload) - len(motion_stored)
+                                    )
+                                    stored_payload = motion_stored
+                                    frame_flags = (
+                                        motion_compression_flag | FRAME_FLAG_GLOBAL_MOTION
+                                    )
+                                    frame_stats = motion_stats
+                                    frame_saving = motion_saving
+                                    compression_flag = motion_compression_flag
+
+                        if compression_flag == FRAME_FLAG_LZ4:
                             total_lz4_frames += 1
                             total_compression_savings += frame_saving
-                        elif frame_flags == FRAME_FLAG_DEFLATE:
+                        elif compression_flag == FRAME_FLAG_DEFLATE:
                             total_deflate_frames += 1
                             total_compression_savings += frame_saving
                         frame_offset = write_frame_record(
@@ -1132,6 +1214,8 @@ def convert(args: argparse.Namespace) -> None:
             f"  LZ4-HC frames: {total_lz4_frames}/{stored_frame_count}\n"
             f"  DEFLATE/Huffman frames: {total_deflate_frames}/{stored_frame_count}\n"
             f"  Compression bytes saved: {total_compression_savings:,}\n"
+            f"  Global-motion frames: {total_motion_frames}/{stored_frame_count}\n"
+            f"  Bytes saved by global motion: {total_motion_bytes_saved:,}\n"
             f"  File size: {size:,} bytes ({size / (1024 * 1024):.2f} MiB)\n"
             f"  Conversion time: {elapsed_wall:.2f} s\n"
             f"  Conversion speed: {seconds / elapsed_wall:.2f}× realtime\n"
@@ -1156,7 +1240,7 @@ def convert(args: argparse.Namespace) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Convert an FFmpeg-readable video into the CPV v1.2 format."
+        description="Convert an FFmpeg-readable video into the CPV v1.3 format."
     )
     parser.add_argument("input", help="input video file supported by FFmpeg")
     parser.add_argument("--output", required=True, help="output .cpv file")
@@ -1168,11 +1252,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--palette-quality", type=int, choices=range(0, 101), default=75,
-        help="palette budget: 0 (8 fixed + adaptive colours) to 100 (256 colours + RAW565 fallback; default: 75)",
+        help="palette budget: 0 (36 legacy seed colours) to 100 (256 colours + RAW565 fallback; default: 75)",
     )
     parser.add_argument(
         "--preprocess-quality", type=int, choices=range(0, 101), default=0,
         help="spatial/temporal denoising strength: 0 disables it, 100 is strongest (default: 0)",
+    )
+    parser.add_argument(
+        "--no-global-motion", action="store_true",
+        help="disable optional global-motion prediction on P-frames (benchmarking only)",
     )
     parser.add_argument(
         "--no-delta-mask", action="store_true",
