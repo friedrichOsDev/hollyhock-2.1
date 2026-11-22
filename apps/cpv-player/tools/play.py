@@ -215,6 +215,8 @@ class CPVFile:
             if frame_type not in (FRAME_I, FRAME_P):
                 raise CPVError(f"frame {number} has unknown type {frame_type}")
             if frame_flags & ~FRAME_FLAGS_MASK or frame_flags == FRAME_FLAGS_MASK:
+            if minor < 2 and frame_flags & FRAME_FLAG_DEFLATE:
+                raise CPVError(f"frame {number}: DEFLATE flag is only supported in CPV 1.2")
                 raise CPVError(f"frame {number} has unknown flag bits 0x{frame_flags:02x}")
             if minor == 0 and frame_flags != 0:
                 raise CPVError(f"CPV 1.0 frame {number} must have zero flags")
@@ -287,29 +289,26 @@ class CPVFile:
         max_decoded_size = pixel_count * 3
         if record.flags & (FRAME_FLAG_LZ4 | FRAME_FLAG_DEFLATE):
             if self.version_minor < 1:
-                raise CPVError(f"frame {record.number}: LZ4 is not valid in CPV 1.0")
-            if lz4_block is None:
-                raise CPVError(
-                    "this video contains LZ4-compressed frames; install python-lz4 "
-                    "(Arch/CachyOS: sudo pacman -S python-lz4)"
-                )
+                raise CPVError(f"frame {record.number}: compression flags are invalid in CPV 1.0")
+            if record.flags == FRAME_FLAG_DEFLATE and self.version_minor < 2:
+                raise CPVError(f"frame {record.number}: DEFLATE is invalid in CPV 1.1")
             if record.payload_size < 5:
-                raise CPVError(f"frame {record.number}: truncated LZ4 payload")
+                raise CPVError(f"frame {record.number}: truncated compressed payload")
             stored = self._read_exact_at(
                 record.payload_offset, record.payload_size, f"frame {record.number} payload"
             )
             decoded_size = struct.unpack_from("<I", stored, 0)[0]
             if not (1 <= decoded_size <= max_decoded_size):
                 raise CPVError(
-                    f"frame {record.number}: invalid LZ4 decoded size {decoded_size}"
+                    f"frame {record.number}: invalid decoded size {decoded_size}"
                 )
             if record.payload_size - 4 >= decoded_size:
-                raise CPVError(f"frame {record.number}: LZ4 block is not smaller than raw payload")
+                raise CPVError(f"frame {record.number}: compressed payload is not smaller than raw payload")
             try:
                 if record.flags == FRAME_FLAG_LZ4:
                     if lz4_block is None:
                         raise CPVError(
-                            "this video uses LZ4-HC; install python-lz4 "
+                            "this video uses LZ4; install python-lz4 "
                             "(Arch/CachyOS: sudo pacman -S python-lz4)"
                         )
                     decoded = lz4_block.decompress(stored[4:], uncompressed_size=decoded_size)
@@ -317,7 +316,9 @@ class CPVFile:
                     import zlib
                     decoder = zlib.decompressobj()
                     decoded = decoder.decompress(stored[4:], decoded_size + 1)
-                    if decoder.unconsumed_tail or not decoder.eof or decoder.unused_data:
+                    if len(decoded) > decoded_size or decoder.unconsumed_tail:
+                        raise CPVError(f"frame {record.number}: DEFLATE output exceeds declared size")
+                    if not decoder.eof or decoder.unused_data:
                         raise CPVError(f"frame {record.number}: invalid DEFLATE stream or trailing data")
                     decoded += decoder.flush()
                 else:
@@ -329,7 +330,8 @@ class CPVFile:
             if len(decoded) != decoded_size:
                 raise CPVError(
                     f"frame {record.number}: decoded {len(decoded)} bytes, expected {decoded_size}"
-                )            return decoded
+                )
+            return decoded
 
         if record.payload_size > max_decoded_size:
             raise CPVError(
