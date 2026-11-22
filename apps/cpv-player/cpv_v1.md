@@ -1145,6 +1145,8 @@ The calculator implementation SHOULD:
 - Avoid recursion.
 - Avoid allocation per packet or per pixel.
 - Avoid copying the full framebuffer between frames when the reference surface can be updated in place.
+
+The calculator can apply this translation in place without allocating a second full framebuffer: first shift each row horizontally with overlap-safe memmove and fill the exposed columns; then shift whole rows vertically in the appropriate copy direction and fill the exposed rows. Horizontal and vertical translation commute for this rectangular raster layout. The motion operation touches at most width × height RGB565 pixels and uses only the already allocated reference surface.
 - Use direct LCD VRAM as the reference surface when its layout permits.
 - Refresh the display once per complete frame rather than once per pixel.
 
@@ -1157,7 +1159,7 @@ The desktop encoder and calculator decoder have different responsibilities. Pale
 CPV v1.1, v1.2 and v1.3 require:
 
 - Major version 1.
-- Minor version 1 enables bit-packed palette literals, DELTA_MASK, and optional per-frame LZ4. Minor version 2 adds optional DEFLATE/Huffman-coded frame payloads. Minor version 3 adds global-motion prediction. Minor version 3 adds optional global-motion prediction on P-frames.
+- Minor version 1 enables bit-packed palette literals, DELTA_MASK, and optional per-frame LZ4. Minor version 2 adds optional DEFLATE/Huffman-coded frame payloads. Minor version 3 adds optional global-motion prediction on P-frames.
 - Minor version 0 files retain the original byte-index packet semantics and have no compression flags.
 - A 64-byte file header.
 - A 20-byte frame header.
