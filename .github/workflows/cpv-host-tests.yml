@@ -1,4 +1,4 @@
-name: CPV host tests
+name: CPV host and legacy converter tests
 
 on:
   push:
