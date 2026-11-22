@@ -434,6 +434,8 @@ class CPVFile:
                 (dx == 0 and dy == 0)
                 or abs(dx) > MAX_GLOBAL_MOTION
                 or abs(dy) > MAX_GLOBAL_MOTION
+                or abs(dx) >= self.width
+                or abs(dy) >= self.height
             ):
                 raise CPVError(f"frame {frame_number}: invalid global-motion vector ({dx}, {dy})")
             source = framebuffer.reshape(self.height, self.width)
