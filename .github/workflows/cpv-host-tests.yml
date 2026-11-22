@@ -34,3 +34,9 @@ jobs:
         run: |
           python apps/cpv-player/tools/convert.py --help
           python apps/cpv-player/tools/play.py --help
+      - name: Calculator global-motion helper test
+        run: |
+          g++ -std=c++11 -Wall -Wextra -Werror \
+            apps/cpv-player/tools/test_motion.cpp \
+            -o /tmp/cpv-motion-test
+          /tmp/cpv-motion-test
