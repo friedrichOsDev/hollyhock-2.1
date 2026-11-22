@@ -257,9 +257,10 @@ def build_legacy_seed_palette() -> np.ndarray:
     """Create the old 36-colour palette: 12 hues, each dark / normal / light."""
     require_numpy()
     rgb = np.frombuffer(build_legacy_seed_rgb24(), dtype=np.uint8).reshape(-1, 3).astype(np.uint16)
-    r5 = (rgb[:, 0] * 31 + 127) // 255
-    g6 = (rgb[:, 1] * 63 + 127) // 255
-    b5 = (rgb[:, 2] * 31 + 127) // 255
+    # Match the original encoder's exact RGB888-to-RGB565 truncation.
+    r5 = rgb[:, 0] >> 3
+    g6 = rgb[:, 1] >> 2
+    b5 = rgb[:, 2] >> 3
     colours = ((r5 << 11) | (g6 << 5) | b5).astype(np.uint16)
     return colours
 
