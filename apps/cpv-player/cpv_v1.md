@@ -1,6 +1,6 @@
 # CPV Video Format Specification
 
-**Document:** CPV v1.2  
+**Document:** CPV v1.3  
 **File extension:** `.cpv`  
 **Status:** Proposed specification — implementation baseline  
 **Target platform:** Casio fx-CP400 running Hollyhock 2.1  
@@ -253,7 +253,7 @@ The file header is exactly **64 bytes**.
 |---:|---|---|---:|---|
 | 0 | `magic` | char[4] | 4 | ASCII `CPV\0` |
 | 4 | `version_major` | uint8 | 1 | 1 |
-| 5 | `version_minor` | uint8 | 1 | 2 for CPV v1.2; v1.0/v1.1 readers MAY also be supported |
+| 5 | `version_minor` | uint8 | 1 | 3 for CPV v1.3; v1.0/v1.1/v1.2 readers MAY also be supported |
 | 6 | `header_size` | uint16 | 2 | 64 |
 | 8 | `flags` | uint32 | 4 | 0 in v1 |
 | 12 | `width` | uint16 | 2 | 1–528 |
@@ -275,7 +275,7 @@ The file header is exactly **64 bytes**.
 Before playback, a decoder MUST verify:
 
 - Magic is exactly `CPV\0`.
-- Major version is 1 and minor version is 0, 1, or 2. Version 1.0 uses byte-sized INDEX_LITERAL values and has no frame compression or DELTA_MASK packets; version 1.1 enables bit-packing, DELTA_MASK, and LZ4; version 1.2 adds DEFLATE frame payloads.
+- Major version is 1 and minor version is 0, 1, 2, or 3. Version 1.0 uses byte-sized INDEX_LITERAL values and has no frame compression or DELTA_MASK packets; version 1.1 enables bit-packing, DELTA_MASK, and LZ4; version 1.2 adds DEFLATE frame payloads; version 1.3 adds optional global-motion prediction.
 - Header size is exactly 64.
 - Flags and all reserved fields are zero.
 - Width and height are within the specified limits.
@@ -363,7 +363,7 @@ Every stored frame is represented by a frame record. Its fixed header is exactly
 |---:|---|---|---:|---|
 | 0 | `magic` | char[4] | 4 | ASCII `FRM1` |
 | 4 | `frame_type` | uint8 | 1 | 0 = I-frame, 1 = P-frame |
-| 5 | `flags` | uint8 | 1 | Bit 0: independent LZ4 block; bit 1: independent DEFLATE stream; all other bits zero. Exactly one compression flag may be set |
+| 5 | `flags` | uint8 | 1 | Bit 0: independent LZ4 block; bit 1: independent DEFLATE stream; bit 2: global-motion P-frame prediction; bits 3–7 zero. LZ4 and DEFLATE are mutually exclusive; either may combine with global motion |
 | 6 | `header_size` | uint16 | 2 | 20 |
 | 8 | `frame_number` | uint32 | 4 | Sequential stored-record number, starting at 0 |
 | 12 | `duration_ms` | uint32 | 4 | Display duration |
@@ -374,7 +374,7 @@ The payload begins immediately after the frame header and contains exactly `payl
 
 ### 9.3 Optional independent LZ4 frame payload
 
-In CPV v1.1 and v1.2, frame flag bit 0 (`FRAME_FLAG_LZ4 = 0x01`) indicates that the stored frame payload is a raw LZ4 block. CPV v1.2 additionally supports flag bit 1 (`FRAME_FLAG_DEFLATE = 0x02`), indicating a zlib-wrapped DEFLATE stream (which uses Huffman coding). Exactly one compression flag may be set. Each frame is compressed independently; there is no cross-frame dictionary.
+In CPV v1.1–v1.3, frame flag bit 0 (FRAME_FLAG_LZ4 = 0x01) indicates that the stored frame payload is a raw LZ4 block. CPV v1.2 and newer additionally support flag bit 1 (FRAME_FLAG_DEFLATE = 0x02), indicating a zlib-wrapped DEFLATE stream (which uses Huffman coding). LZ4 and DEFLATE are mutually exclusive. Either compression flag may be combined with the global-motion flag defined in Section 9.5. Each frame is compressed independently; there is no cross-frame dictionary.
 
 For a compressed frame, the stored payload is:
 
@@ -383,9 +383,9 @@ For a compressed frame, the stored payload is:
 | `uncompressed_size` | uint32 little-endian | 4 bytes |
 | `lz4_block` | raw LZ4 block | remaining payload bytes |
 
-The four-byte size is the exact byte count of the uncompressed packet stream. The LZ4 block MUST decompress to exactly this size. The decoder MUST validate the size before allocating or decompressing; it MUST NOT allow the decompressed packet stream to exceed `3 × width × height` bytes. This bound covers the maximum normal packet overhead per pixel.
+The four-byte size is the exact byte count of the uncompressed frame stream (including the optional four-byte global-motion header). The LZ4 block MUST decompress to exactly this size. The decoder MUST validate the size before allocating or decompressing; it MUST NOT allow the decompressed frame stream to exceed `3 × width × height + 4` bytes. Without global motion, the normal bound is `3 × width × height` bytes.
 
-If frame flag bit 0 is clear, the stored payload is the ordinary packet stream. A v1.0 frame MUST have flags equal to zero. A v1.1 encoder SHOULD use LZ4 only when the four-byte size prefix plus compressed block is smaller than the original packet stream by a worthwhile margin. An uncompressed frame does not need an LZ4 dependency.
+If frame flag bit 0 is clear, the stored payload is the ordinary packet stream. A v1.0 frame MUST have flags equal to zero. A v1.1–v1.3 encoder SHOULD use LZ4 only when the four-byte size prefix plus compressed block is smaller than the original frame stream by a worthwhile margin. An uncompressed frame does not need an LZ4 dependency.
 
 LZ4 is used for its bounded, fast block decoder and is an optional second compression layer. It does not change packet semantics, delta reference rules, or seeking: a decoder decompresses only the selected frame before parsing its packet stream.
 
@@ -423,9 +423,33 @@ The total video duration is the sum of stored frame durations and MUST equal the
 
 ### 9.4 Optional independent DEFLATE frame payload (CPV v1.2)
 
-When frame flag bit 1 is set, the stored payload consists of a four-byte little-endian uncompressed packet-stream size followed by one zlib-wrapped DEFLATE stream. The stream MUST decompress to exactly the declared size. The same upper bound of 3 × width × height bytes applies. A decoder MUST reject invalid, truncated, trailing, or oversized DEFLATE data.
+When frame flag bit 1 is set, the stored payload consists of a four-byte little-endian uncompressed frame-stream size followed by one zlib-wrapped DEFLATE stream. The stream MUST decompress to exactly the declared size. The upper bound is 3 × width × height + 4 bytes when global motion is also enabled, otherwise 3 × width × height bytes. A decoder MUST reject invalid, truncated, trailing, or oversized DEFLATE data.
 
 DEFLATE is a lossless compressor using LZ77 and Huffman coding. It may be smaller than LZ4 for some packet streams but can require more decoder CPU and memory. An encoder MAY compare DEFLATE level 9 and LZ4 high-compression and select whichever complete representation (including the four-byte size prefix) is smaller, provided it is worthwhile. CPV v1.1 readers do not support this flag and MUST reject it.
+
+### 9.5 Optional global-motion prediction (CPV v1.3)
+
+Global motion is an optional prediction applied to P-frames before ordinary packet decoding. It represents a small translation of the complete previous reconstructed RGB565 image. The decoder performs the translation, fills newly exposed pixels with one RGB565 colour, and then applies the normal P-frame packet stream. SKIP and DELTA_MASK semantics remain exact comparisons against this translated prediction.
+
+Frame flag bit 2 (FRAME_FLAG_GLOBAL_MOTION = 0x04) indicates that the uncompressed frame stream begins with this four-byte header:
+
+| Field | Type | Size | Meaning |
+|---|---|---:|---|
+| dx | int8 | 1 | Horizontal translation in pixels; positive moves right |
+| dy | int8 | 1 | Vertical translation in pixels; positive moves down |
+| fill_colour | uint16 little-endian | 2 | RGB565 value used for pixels exposed by the translation |
+
+The vector MUST be non-zero and MUST satisfy -8 <= dx, dy <= 8. The flag is valid only for P-frames and only in CPV v1.3. It MAY be combined with exactly one frame-compression flag. The global-motion header is part of the uncompressed frame stream; therefore it follows the four-byte uncompressed-size prefix after decompression when LZ4 or DEFLATE is used.
+
+The translated prediction is defined by:
+
+predicted[x + dx, y + dy] = previous[x, y]
+
+for every source coordinate whose destination remains inside the frame. Every destination pixel not reached by this mapping is set to fill_colour. The decoder MUST apply this translation before interpreting any packet in the P-frame. The subsequent packet stream still covers exactly width × height pixels in raster order.
+
+The encoder SHOULD estimate motion from the quantised reconstructed RGB565 frames, build a normal P-frame and a motion-predicted P-frame, compress both complete representations, and select global motion only when the stored motion representation is strictly smaller. A decoder does not estimate motion; it only applies the stored vector.
+
+A v1.0, v1.1, or v1.2 decoder MUST reject this flag. A v1.3 decoder MUST reject the flag on I-frames, a zero vector, vectors outside the permitted range, and a truncated motion header.
 
 ## 10. Packet stream
 
@@ -840,17 +864,28 @@ The normal calculator profile SHOULD prioritise palette-coded data and exact SKI
 
 ### 14.1 Fixed base palette and adaptive colours
 
-CPV v1.2 encoders SHOULD reserve the first eight palette entries, in this order, for RGB565 primary colours:
-- 0: red (0xF800)
-- 1: green (0x07E0)
-- 2: blue (0x001F)
-- 3: yellow (0xFFE0)
-- 4: cyan (0x07FF)
-- 5: magenta (0xF81F)
-- 6: black (0x0000)
-- 7: white (0xFFFF)
+The host encoder MUST reproduce the original CPV seed palette as the first 36 RGB565 entries. It is generated from these twelve RGB888 base hues, in this order:
 
-These entries guarantee that the basic colour gamut is represented even when palette budgets are small. Remaining entries SHOULD be selected adaptively from the complete preprocessed video. Duplicate colours MUST be removed without changing the order of the reserved entries. Quality profiles MUST use at least eight colours.
+| Hue | RGB888 |
+|---|---|
+| Red | (255, 0, 0) |
+| Green | (0, 255, 0) |
+| Blue | (0, 0, 255) |
+| Yellow | (255, 255, 0) |
+| Cyan | (0, 255, 255) |
+| Magenta | (255, 0, 255) |
+| Orange | (255, 128, 0) |
+| Pink | (255, 0, 128) |
+| Spring green / turquoise | (0, 255, 128) |
+| Violet | (128, 0, 255) |
+| Brown | (139, 69, 19) |
+| Grey | (128, 128, 128) |
+
+For each hue, the encoder appends three variants before moving to the next hue: dark (r//2, g//2, b//2), normal (r, g, b), and light (r + (255-r)//2, g + (255-g)//2, b + (255-b)//2). Each variant is converted to RGB565 using the legacy truncation (r >> 3, g >> 2, b >> 3). These 36 entries MUST occupy palette indices 0–35 in exactly this order.
+
+To reproduce the legacy image-seeded palette generation, the encoder SHOULD supply these 36 RGB888 colours as one raw 6×6 frame to FFmpeg, scale that seed image to the output width using nearest-neighbour sampling, stack it with the preprocessed video, and run global palettegen over the combined stream. The final palette starts with the exact 36 RGB565 seed entries; remaining unique entries are taken from FFmpeg's seed-weighted adaptive palette until the configured budget is reached. Transparent palette padding MUST be ignored.
+
+The current host quality budget is 36 colours for quality 0–39, 64 for 40–59, 128 for 60–79, and 256 for 80–100. Quality 100 additionally uses RAW565 for pixels not represented exactly. At least 36 palette entries are therefore required for files generated by this encoder, although a decoder MUST continue accepting older files with smaller valid palettes.
 
 
 ### 14.2 Denoising
@@ -898,17 +933,35 @@ A decoder SHOULD:
 
 ### 15.2 Packet decoder pseudocode
 
-First, resolve the frame payload. If the LZ4 flag is clear, use the stored payload as-is. If it is set, read and validate the four-byte uncompressed-size prefix, decompress exactly one independent LZ4 block, and parse the resulting packet stream. The packet reader then operates only on that bounded, uncompressed stream.
+First, resolve the frame payload. If an LZ4 or DEFLATE flag is set, read and validate the four-byte uncompressed-size prefix and decompress exactly one independent block or stream. The uncompressed frame stream may begin with the four-byte global-motion header. Apply that prediction to the reference surface before parsing the remaining ordinary packet stream.
 
 ```text
-if frame_flags & FRAME_FLAG_LZ4:
+compression_flags = frame_flags & (FRAME_FLAG_LZ4 | FRAME_FLAG_DEFLATE)
+if compression_flags == FRAME_FLAG_LZ4:
     require minor_version >= 1
     uncompressed_size = read_u32_le()
-    require 1 <= uncompressed_size <= 3 * width * height
-    packet_stream = lz4_decompress_exactly(remaining_payload, uncompressed_size)
+    require 1 <= uncompressed_size <= 3 * width * height + 4
+    frame_stream = lz4_decompress_exactly(remaining_payload, uncompressed_size)
+elif compression_flags == FRAME_FLAG_DEFLATE:
+    require minor_version >= 2
+    uncompressed_size = read_u32_le()
+    require 1 <= uncompressed_size <= 3 * width * height + 4
+    frame_stream = deflate_decompress_exactly(remaining_payload, uncompressed_size)
 else:
-    require frame_flags == 0
-    packet_stream = stored_payload
+    frame_stream = stored_payload
+
+if frame_flags & FRAME_FLAG_GLOBAL_MOTION:
+    require minor_version >= 3
+    require frame_type == P_FRAME
+    dx = read_i8(frame_stream)
+    dy = read_i8(frame_stream)
+    fill_colour = read_u16_le(frame_stream)
+    require -8 <= dx <= 8 and -8 <= dy <= 8
+    require dx != 0 or dy != 0
+    shift_reference_surface(dx, dy, fill_colour)
+    packet_stream = remaining_frame_stream
+else:
+    packet_stream = frame_stream
 
 pixel_position = 0
 
@@ -1040,7 +1093,9 @@ A decoder MUST reject malformed files safely and MUST NOT read beyond the file, 
 
 - Frame magic `FRM1`.
 - Frame type is I or P.
-- Flags are zero.
+- Only defined frame-flag bits are set; LZ4 and DEFLATE are not both set.
+- DEFLATE is used only in minor version 2 or newer.
+- Global motion is used only in minor version 3 or newer and only on P-frames.
 - Header size is 20.
 - Frame number is sequential.
 - Duration is positive.
@@ -1099,21 +1154,21 @@ The desktop encoder and calculator decoder have different responsibilities. Pale
 
 ## 19. Compatibility and versioning
 
-CPV v1.1 and v1.2 require:
+CPV v1.1, v1.2 and v1.3 require:
 
 - Major version 1.
-- Minor version 1 enables bit-packed palette literals, DELTA_MASK, and optional per-frame LZ4. Minor version 2 adds optional DEFLATE/Huffman-coded frame payloads.
+- Minor version 1 enables bit-packed palette literals, DELTA_MASK, and optional per-frame LZ4. Minor version 2 adds optional DEFLATE/Huffman-coded frame payloads. Minor version 3 adds global-motion prediction. Minor version 3 adds optional global-motion prediction on P-frames.
 - Minor version 0 files retain the original byte-index packet semantics and have no compression flags.
 - A 64-byte file header.
 - A 20-byte frame header.
 - The four primary packet opcodes and the DELTA_MASK SKIP extension defined in Section 10.
 - The packet-length encoding and reserved DELTA_MASK sentinel defined in Section 10.1.
-- The bit-packed INDEX_LITERAL representation and optional independent LZ4 block representation. CPV v1.2 also supports independent DEFLATE streams.
+- The bit-packed INDEX_LITERAL representation and DELTA_MASK. CPV v1.1 adds LZ4, v1.2 adds DEFLATE, and v1.3 adds global-motion prediction.
 - An `IDX1` index at the end of the file.
 
 A decoder MUST reject unknown major versions.
 
-A strict v1.0 decoder MUST reject a non-zero frame flag, DELTA_MASK sentinel, or other v1.1-only encoding. A v1.2 decoder MUST accept v1.0 and v1.1 files by using eight-bit INDEX_LITERAL values in minor version 0 and rejecting DEFLATE flags in minor versions below 2. Unknown frame flag bits MUST be rejected. Any future change that alters the container header, reconstruction model, or core packet grammar requires a new major version.
+A strict v1.0 decoder MUST reject a non-zero frame flag, DELTA_MASK sentinel, or other v1.1-only encoding. A v1.3 decoder MUST accept v1.0, v1.1 and v1.2 files by using eight-bit INDEX_LITERAL values in minor version 0, rejecting DEFLATE flags in minor versions below 2, and rejecting global-motion flags in minor versions below 3. Unknown frame flag bits MUST be rejected. Any future change that alters the container header, reconstruction model, or core packet grammar requires a new major version.
 
 ---
 
@@ -1149,7 +1204,7 @@ The normal target profile is 528 × 320 at 10 FPS. Lower resolutions and frame r
 
 ## 21. Required implementation tests
 
-A CPV v1 implementation SHOULD test every packet type and boundary.
+A CPV v1.3 implementation SHOULD test every packet type and boundary.
 
 ### 21.1 Packet tests
 
