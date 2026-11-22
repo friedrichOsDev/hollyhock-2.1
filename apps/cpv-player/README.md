@@ -78,7 +78,6 @@ The converter separates colour quantisation from pre-processing. Adjust these in
 | Palette quality | Palette budget | Behaviour |
 |---:|---:|---|
 | 0–9 | 8 colours (fixed base palette) | Extreme quantisation |
-| 5–9 | 8 colours (fixed base palette) | Extreme quantisation |
 | 10–24 | 16 colours | Strong colour quantisation |
 | 25–39 | 32 colours | Aggressive colour reduction |
 | 40–59 | 64 colours | Balanced colour reduction |
