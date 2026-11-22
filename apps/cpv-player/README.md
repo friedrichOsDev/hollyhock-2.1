@@ -1,6 +1,6 @@
 # CPV Player
 
-A Hollyhock 2.1 application for playing CPV v1.1 video files on the Casio fx-CP400. The host tools also read earlier CPV v1.0 files. The `tools/` directory also contains a desktop encoder and a reference preview player.
+A Hollyhock 2.1 application for playing CPV v1.2 video files on the Casio fx-CP400. The host tools also read CPV v1.0 and v1.1 files. The `tools/` directory also contains a desktop encoder and a reference preview player.
 
 ## Host tool requirements
 
@@ -25,7 +25,7 @@ python3 -c "import numpy, lz4.block; print(numpy.__version__, lz4.__version__)"
 python3 -m tkinter
 ```
 
-The converter uses NumPy to accelerate RGB565 conversion, palette lookup, bit-packing, delta analysis, and packet preparation. The hybrid palette preserves selected frequent video-derived anchor colours, then FFmpeg fills the remaining budget. LZ4 uses high-compression mode (slower conversion, smaller output). The desktop player uses NumPy for frame decoding and RGB preview conversion, and python-lz4 for independently compressed frame payloads.
+The converter uses NumPy to accelerate RGB565 conversion, palette lookup, bit-packing, delta analysis, and packet preparation. The palette reserves its first eight entries for red, green, blue, yellow, cyan, magenta, black and white, then FFmpeg's video-adaptive quantiser fills the remaining budget. The converter compares LZ4 high-compression with zlib DEFLATE (which uses Huffman coding) per frame and selects the smaller result. LZ4 is optional; DEFLATE is available from Python's standard library.
 
 ## Convert a video
 
@@ -59,13 +59,13 @@ By default, the converter preserves the source aspect ratio and fills unused spa
 
 ### Compression settings
 
-CPV v1.1 applies three independent optimisations:
+CPV v1.1/v1.2 applies these optimisations:
 
 1. **Bit-packed palette indices.** INDEX_LITERAL and DELTA_MASK indices use the minimum width for the active palette: 4 bits for up to 16 colours, 5 bits for up to 32, 6 bits for up to 64, 7 bits for up to 128, and 8 bits for up to 256. INDEX_REPEAT keeps a one-byte index.
 2. **DELTA_MASK packets.** Mixed spans of changed and unchanged pixels are represented by a bitmask. The encoder compares the complete byte cost against ordinary SKIP plus data packets and emits the mask only when it is smaller.
-3. **Per-frame LZ4 high compression.** Each frame's packet stream is compressed using LZ4 high-compression mode, trading additional desktop conversion time for smaller data. It is stored only when the four-byte decoded-size prefix plus compressed data is smaller than the uncompressed packet stream. No LZ4 dictionary is shared between frames, so keyframe seeking remains simple.
+3. **Per-frame LZ4-HC vs DEFLATE.** The encoder compares LZ4 high-compression and zlib DEFLATE level 9, which uses Huffman coding, and chooses the smaller stream including the four-byte decoded-size prefix. The frame is left uncompressed if compression does not save at least 1% or 16 bytes. Each frame is independent, so keyframe seeking remains simple. CPV v1.2 adds the DEFLATE flag; LZ4 remains supported.
 
-The converter enables DELTA_MASK and LZ4 by default. LZ4 uses high-compression mode; this may increase conversion time. Use `--no-delta-mask` and/or `--no-lz4` to disable them for benchmarks. The resulting statistics let you compare each optimisation independently.
+The converter enables DELTA_MASK and frame compression by default. DEFLATE is built into Python; LZ4 is tried if python-lz4 is installed. Use `--no-delta-mask` and/or `--no-frame-compression` (alias `--no-lz4`) to disable them for benchmarks. The resulting statistics let you compare each optimisation independently.
 
 ### Independent quality settings
 
@@ -77,8 +77,8 @@ The converter separates colour quantisation from pre-processing. Adjust these in
 
 | Palette quality | Palette budget | Behaviour |
 |---:|---:|---|
-| 0–4 | 4 colours | Extreme quantisation |
-| 5–9 | 8 colours | Very strong quantisation |
+| 0–9 | 8 colours (fixed base palette) | Extreme quantisation |
+| 5–9 | 8 colours (fixed base palette) | Extreme quantisation |
 | 10–24 | 16 colours | Strong colour quantisation |
 | 25–39 | 32 colours | Aggressive colour reduction |
 | 40–59 | 64 colours | Balanced colour reduction |
@@ -114,7 +114,7 @@ python3 tools/convert.py input.mp4 \
     --preprocess-quality 35
 ```
 
-Use `--palette-quality` to trade colour accuracy for a smaller palette, and `--preprocess-quality` to trade fine image detail for smoother frames and potentially better temporal compression. The hybrid palette tries to keep a few important colours even at very small palette budgets, but because anchors are drawn from sampled video colours it cannot guarantee a specific exact RGB565 colour.
+Use `--palette-quality` to trade colour accuracy for a smaller palette, and `--preprocess-quality` to trade fine image detail for smoother frames and potentially better temporal compression. The eight base colours are guaranteed exactly; remaining entries are video-adaptive.
 
 ### Additional options
 
@@ -125,13 +125,13 @@ Use `--palette-quality` to trade colour accuracy for a smaller palette, and `--p
 - `--palette-quality 0..100`: global colour palette budget and RGB565-preserving RAW fallback (default `75`).
 - `--preprocess-quality 0..100`: spatial/temporal `hqdn3d` denoising strength; `0` disables pre-processing (default `0`).
 - `--no-delta-mask`: disable mixed SKIP/data delta-mask packets.
-- `--no-lz4`: disable optional independent per-frame LZ4 compression.
+- `--no-frame-compression` (alias `--no-lz4`): disable LZ4-HC and DEFLATE compression.
 - `--ffmpeg PATH`: select an FFmpeg executable.
 - `--ffprobe PATH`: select an FFprobe executable.
 
 Run `python3 tools/convert.py --help` for the complete option list.
 
-The converter reports the global palette size, palette-index bit width, input and stored frame counts, keyframe count, duration, file size, packet counts/bytes by packet type, the number of LZ4-compressed frames, and the bytes saved by LZ4.
+The converter reports the global palette size, palette-index bit width, input and stored frame counts, keyframe count, duration, file size, packet counts/bytes by packet type, LZ4-HC and DEFLATE frame counts, and total compression savings.
 
 ## Play a CPV file on the host
 
@@ -139,7 +139,7 @@ The converter reports the global palette size, palette-index bit width, input an
 python3 tools/play.py output.cpv
 ```
 
-The desktop player validates the file header, global palette, frame records and flags, packet streams (including bit-packed indices and DELTA_MASK), LZ4 size limits, and keyframe index before or during playback. It supports sequential playback and keyframe-based seeking. Compressed frames require `python-lz4`.
+The desktop player validates the file header, global palette, frame records and flags, packet streams (including bit-packed indices and DELTA_MASK), compressed payload size limits, and keyframe index before or during playback. It supports sequential playback and keyframe-based seeking. LZ4-compressed frames require `python-lz4`; DEFLATE uses the Python standard library.
 
 Controls:
 
@@ -155,6 +155,6 @@ The preview player requires a working graphical desktop session and Tkinter. It 
 
 See [cpv_v1.md](cpv_v1.md) for the complete byte-level container, packet, encoder, decoder, validation, and test specification.
 
-CPV v1.1 uses a 64-byte little-endian file header, one global RGB565 palette, 20-byte frame headers, four primary packet types (INDEX_LITERAL, INDEX_REPEAT, SKIP, RAW565), the DELTA_MASK SKIP extension, optional independently compressed LZ4 frame payloads, I/P-frames, and a 12-byte keyframe index entry format. The file header and frame-header sizes remain unchanged from v1.0; the version minor field is 1.
+CPV v1.2 uses a 64-byte little-endian file header, one global RGB565 palette, 20-byte frame headers, four primary packet types (INDEX_LITERAL, INDEX_REPEAT, SKIP, RAW565), the DELTA_MASK SKIP extension, optional independent LZ4 or DEFLATE frame payloads, I/P-frames, and a 12-byte keyframe index entry format. The file header and frame-header sizes remain unchanged from v1.0; the version minor field is 2.
 
-The host player accepts both CPV v1.0 and v1.1. Version 1.0 literals use one byte per index and do not support DELTA_MASK or compressed frame flags. New conversions use v1.1. Neither version is backward-compatible with the legacy `CP` format or the earlier experimental tile-based CPV draft. Those files MUST be converted again with this version of `convert.py`.
+The host player accepts CPV v1.0, v1.1 and v1.2. Version 1.0 literals use one byte per index and do not support DELTA_MASK or compressed frame flags. Version 1.1 supports LZ4 only. New conversions use v1.2. Neither version is backward-compatible with the legacy `CP` format or the earlier experimental tile-based CPV draft. Those files MUST be converted again with this version of `convert.py`.
