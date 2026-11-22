@@ -439,7 +439,7 @@ Frame flag bit 2 (FRAME_FLAG_GLOBAL_MOTION = 0x04) indicates that the uncompress
 | dy | int8 | 1 | Vertical translation in pixels; positive moves down |
 | fill_colour | uint16 little-endian | 2 | RGB565 value used for pixels exposed by the translation |
 
-The vector MUST be non-zero and MUST satisfy -8 <= dx, dy <= 8. The flag is valid only for P-frames and only in CPV v1.3. It MAY be combined with exactly one frame-compression flag. The global-motion header is part of the uncompressed frame stream; therefore it follows the four-byte uncompressed-size prefix after decompression when LZ4 or DEFLATE is used.
+The vector MUST be non-zero and MUST satisfy -8 <= dx, dy <= 8, abs(dx) < width, and abs(dy) < height. The flag is valid only for P-frames and only in CPV v1.3. It MAY be combined with exactly one frame-compression flag. The global-motion header is part of the uncompressed frame stream; therefore it follows the four-byte uncompressed-size prefix after decompression when LZ4 or DEFLATE is used.
 
 The translated prediction is defined by:
 
@@ -1145,8 +1145,7 @@ The calculator implementation SHOULD:
 - Avoid recursion.
 - Avoid allocation per packet or per pixel.
 - Avoid copying the full framebuffer between frames when the reference surface can be updated in place.
-
-The calculator can apply this translation in place without allocating a second full framebuffer: first shift each row horizontally with overlap-safe memmove and fill the exposed columns; then shift whole rows vertically in the appropriate copy direction and fill the exposed rows. Horizontal and vertical translation commute for this rectangular raster layout. The motion operation touches at most width × height RGB565 pixels and uses only the already allocated reference surface.
+- Apply global motion in place when possible: shift each row horizontally with overlap-safe memmove and fill exposed columns; then shift whole rows vertically in the appropriate copy direction and fill exposed rows. This needs no second full framebuffer and touches at most width × height RGB565 pixels.
 - Use direct LCD VRAM as the reference surface when its layout permits.
 - Refresh the display once per complete frame rather than once per pixel.
 
