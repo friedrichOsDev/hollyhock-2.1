@@ -1178,7 +1178,7 @@ A strict v1.0 decoder MUST reject a non-zero frame flag, DELTA_MASK sentinel, or
 The command-line interface is not part of the binary format, but the host converter SHOULD provide a stable interface similar to:
 
 ```bash
-python3 tools/convert.py input.mp4 \
+tools/cpv_convert input.mp4 \
     --output output.cpv \
     --width 528 \
     --height 320 \
@@ -1186,6 +1186,8 @@ python3 tools/convert.py input.mp4 \
     --palette-quality 75 \
     --preprocess-quality 35
 ```
+
+The repository's reference host encoder is implemented in native C++17. Build it with `make -C tools`. It uses FFmpeg/FFprobe for media decoding and palette generation, zlib for DEFLATE, and LZ4 for optional LZ4-HC compression.
 
 Recommended options:
 
