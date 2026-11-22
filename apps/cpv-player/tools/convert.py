@@ -322,9 +322,9 @@ def estimate_global_motion(
     current_2d = np.asarray(current, dtype=np.uint16).reshape(height, width)
     previous_2d = np.asarray(previous, dtype=np.uint16).reshape(height, width)
 
-    # Coarse grid: at most roughly 17x10 samples at the calculator's target size.
-    coarse_step = max(4, max(width, height) // 32)
-    coarse_candidates = range(-max_shift, max_shift + 1, 2)
+    # Coarse grid: small enough to search every integer vector efficiently.
+    coarse_step = max(8, max(width, height) // 32)
+    coarse_candidates = range(-max_shift, max_shift + 1)
     coarse_dx = coarse_dy = 0
     coarse_score = _motion_match_count(
         current_2d, previous_2d, 0, 0, coarse_step
