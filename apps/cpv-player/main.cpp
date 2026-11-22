@@ -51,7 +51,10 @@ struct PlaybackState {
     bool touchLatched;
     uint16_t latchedKey;
     uint32_t remainingMs;
+    uint32_t pollCount;
+    uint32_t emptyPollCount;
     uint32_t timerEventCount;
+    uint32_t advanceCount;
     const char *lastInput;
     const char *phase;
     uint32_t workCurrent;
@@ -65,7 +68,8 @@ struct PlaybackState {
     PlaybackState()
         : paused(false), ended(false), exit(false), redraw(true),
           touchLatched(false), latchedKey(0), remainingMs(0),
-          timerEventCount(0), lastInput("START"), phase("START"),
+          pollCount(0), emptyPollCount(0), timerEventCount(0),
+          advanceCount(0), lastInput("START"), phase("START"),
           workCurrent(0), workTotal(0), lastRawType(0), lastKeyCode(0),
           lastRawAction(0), lastTouchX(0), lastTouchY(0) {}
 };
@@ -116,7 +120,7 @@ void DrawDebugPage(UI::Framebuffer &screen, const CPV::Decoder &decoder,
                    uint32_t current, uint32_t total) {
     // fx-CP400 is used in portrait orientation (about 320x528). Keep the
     // diagnostic panel in the top strip; the video remains visible below.
-    const int panelHeight = 142;
+    const int panelHeight = 166;
     screen.FillRect(0, 0, screen.Width(), panelHeight, UI::Colors::Black);
     screen.DrawText(8, 4, "CPV DEBUG", UI::Colors::Yellow);
     screen.DrawText(112, 4, state.paused ? "PAUSED" :
@@ -167,11 +171,19 @@ void DrawDebugPage(UI::Framebuffer &screen, const CPV::Decoder &decoder,
     DrawInlineNumber(screen, x, 116, "MASK:", decoder.PacketCount(4));
     DrawInlineNumber(screen, x, 116, "SEEK:", decoder.LastSeekFrames());
 
+    x = 8;
+    DrawInlineNumber(screen, x, 128, "POLL:", state.pollCount);
+    DrawInlineNumber(screen, x, 128, "EMPTY:", state.emptyPollCount);
+
+    x = 8;
+    DrawInlineNumber(screen, x, 140, "TICK:", state.timerEventCount);
+    DrawInlineNumber(screen, x, 140, "STEP:", state.advanceCount);
+
     const uint8_t compression = decoder.LastCompression();
     const char *codec = compression == 1 ? "LZ4" :
                         compression == 2 ? "DEFLATE" : "RAW";
-    screen.DrawText(8, 128, "CODEC:", UI::Colors::Gray);
-    screen.DrawText(50, 128, codec, UI::Colors::White);
+    screen.DrawText(8, 152, "CODEC:", UI::Colors::Gray);
+    screen.DrawText(50, 152, codec, UI::Colors::White);
     screen.Present();
 }
 
@@ -299,6 +311,7 @@ void SeekRelative(CPV::Decoder &decoder, int32_t delta,
 void AdvancePlaybackSlice(PlaybackState &state) {
     if (state.paused || state.ended)
         return;
+    ++state.advanceCount;
     if (state.remainingMs > kWaitSliceMs)
         state.remainingMs -= kWaitSliceMs;
     else
@@ -473,6 +486,7 @@ void PlayVideo(UI::Application &app, const char *path,
         }
 
         UI::Event event;
+        ++state.pollCount;
         const int result = UI::Input::Poll(&event);
         if (result < 0) {
             state.lastInput = "INPUT ERROR";
@@ -499,6 +513,7 @@ void PlayVideo(UI::Application &app, const char *path,
                               state.workCurrent, state.workTotal);
             }
         } else {
+            ++state.emptyPollCount;
             WaitMilliseconds(kWaitSliceMs);
             AdvancePlaybackSlice(state);
         }
