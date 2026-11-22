@@ -832,6 +832,12 @@ The exact palette-size mapping, colour-distance thresholds, sampling policy, and
 
 The normal calculator profile SHOULD prioritise palette-coded data and exact SKIP detection. RAW565 SHOULD be used selectively.
 
+### 14.2 Hybrid global palette selection
+
+Palette construction is encoder policy and does not change the file format. An encoder MAY reserve a small portion of its colour budget for anchor colours selected from actual preprocessed video samples. Suitable targets include dark, light, neutral, warm/skin-like, and primary or secondary colours. The selected anchor MUST be a colour observed in the sampled video; synthetic target colours are not required.
+
+The remaining palette budget SHOULD be filled using a global colour quantiser over the preprocessed video. The encoder MUST ensure the final palette is unique after RGB565 conversion and MUST NOT exceed the configured palette budget. The sampling policy and anchor budget are implementation-defined.
+
 ### 14.1 Denoising
 
 Optional spatial or temporal denoising MAY be applied before palette mapping.
