@@ -519,9 +519,9 @@ Packet layout:
 +---------------------------+
 ```
 
-The packet contains exactly `run_length` index bytes after the packet header.
+The packet contains exactly `ceil(run_length × index_bits / 8)` packed index bytes after the packet header.
 
-Indices are packed with `index_bits = max(1, (palette_count - 1).bit_length())` bits per index, least-significant-bit first. The packed byte count is `ceil(run_length × index_bits / 8)`. Every unpacked index MUST be smaller than `palette_count`. Unused high bits in the final byte MUST be zero. The decoder writes the corresponding palette RGB565 value for each index.
+Indices are packed with `index_bits = max(1, (palette_count - 1).bit_length())` bits per index, least-significant-bit first. Every unpacked index MUST be smaller than `palette_count`. Unused high bits in the final byte MUST be zero. The decoder writes the corresponding palette RGB565 value for each index.
 
 For example, a 64-colour palette uses six bits per index, reducing a long literal stream from one byte per pixel to 0.75 bytes per pixel. A 256-colour palette still uses eight bits.
 

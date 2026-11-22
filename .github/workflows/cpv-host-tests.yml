@@ -31,7 +31,7 @@ jobs:
         run: apps/cpv-player/tools/cpv_convert --self-test
       - name: Host decoder and encoder integration tests
         run: |
-          python -m py_compile apps/cpv-player/tools/play.py apps/cpv-player/tools/test_encoder.py
+          python -m py_compile apps/cpv-player/tools/play.py apps/cpv-player/tools/test_encoder.py apps/cpv-player/tools/benchmark_quality.py
           python -m unittest discover -s apps/cpv-player/tools -p 'test_*.py' -v
       - name: Calculator global-motion helper test
         run: |

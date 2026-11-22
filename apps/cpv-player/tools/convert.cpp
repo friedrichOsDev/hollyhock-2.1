@@ -277,7 +277,7 @@ static void print_help() {
         "Usage: cpv_convert INPUT --output FILE --width N --height N --fps N\n"
         "  --palette-quality 0..100     Palette budget (default 75)\n"
         "  --preprocess-quality 0..100  hqdn3d denoising strength (default 0)\n"
-        "  --keyframe-interval SEC      I-frame interval, 0..10 (default 2)\n"
+        "  --keyframe-interval SEC      I-frame interval, greater than 0 and up to 10 (default 2)\n"
         "  --fit contain|stretch        Preserve aspect ratio or stretch (default contain)\n"
         "  --background RRGGBB         Letterbox colour (default 000000)\n"
         "  --no-global-motion           Disable v1.3 motion trials\n"

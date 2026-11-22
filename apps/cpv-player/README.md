@@ -1,6 +1,6 @@
 # CPV Player
 
-A Hollyhock 2.1 application for playing CPV video files on the Casio fx-CP400. The host-side CPV v1.3 encoder is implemented in native C++; tools/play.py remains the Python reference decoder and desktop preview player.
+The host-side CPV v1.3 encoder is implemented in native C++; tools/play.py is the validated Python reference decoder and desktop preview player. The current Casio application is still a file-selector prototype: its selection callback does not yet decode or display video. The calculator-side playback loop, storage reader, decompressor, packet decoder, and display path remain to be implemented.
 
 ## Host encoder requirements
 
@@ -113,6 +113,12 @@ Higher values mean stronger and more lossy filtering, not higher visual fidelity
 - --self-test: run native packet, bit-packing, palette and motion tests.
 
 Run tools/cpv_convert --help for the full command-line help. The converter reports the palette size, frame counts, keyframes, duration, compression codec counts and winning candidate per frame, DELTA_MASK packetisation winners, compression and motion savings, total file size, conversion time and packet sizes by type.
+
+## Reproducible quality benchmark
+
+Run `python3 apps/cpv-player/tools/benchmark_quality.py [input-video.mp4]` from the repository root. The default input is `apps/cpv-player/tools/2026-11-21_200236.mp4`. The benchmark fixes the output profile to 132×74 at 5 FPS, a 10-second keyframe interval, contain-fit and a black background. It runs nine cases: palette quality 25, 50, 70, 80 and 100 at preprocess quality 100; then preprocess quality 0, 25, 50 and 75 at palette quality 80 (the 80/100 baseline is shared). This isolates palette budget and denoising effects instead of changing both at once.
+
+Every run writes a new CPV file and converter log. `manifest.json` records the exact source-file size, SHA-256 and FFprobe metadata, as well as the shared output profile. `summary.csv` records file size, palette/frame/compression statistics, conversion time, full reference-decoder time and PSNR. PSNR is measured against one common FFmpeg reference at the same output dimensions and FPS but without denoising; therefore it includes both palette/RGB565 error and the visual change caused by preprocessing. Every generated CPV is fully decoded during the benchmark. The benchmark output directory is newly created and is never overwritten.
 
 ## Play a CPV file on the host
 
