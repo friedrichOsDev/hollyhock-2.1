@@ -69,7 +69,7 @@ CPV v1.1–v1.3 applies these optimisations:
 
 1. **Bit-packed palette indices.** INDEX_LITERAL and DELTA_MASK indices use the minimum width for the active palette: 4 bits for up to 16 colours, 5 bits for up to 32, 6 bits for up to 64, 7 bits for up to 128, and 8 bits for up to 256. INDEX_REPEAT keeps a one-byte index.
 2. **DELTA_MASK packets.** Mixed spans of changed and unchanged pixels are represented by a bitmask. The encoder compares the complete byte cost against ordinary SKIP plus data packets and emits the mask only when it is smaller.
-3. **Per-frame LZ4-HC vs DEFLATE.** The encoder compares LZ4 high-compression level 9 with zlib DEFLATE level 9 and chooses the smaller stream, including the four-byte decoded-size prefix. A frame is left uncompressed unless compression saves at least 1% or 16 bytes.
+3. **Per-frame compression portfolio.** For each frame the encoder tests eight zlib/DEFLATE configurations (levels 1, 3, 6, 9 and four level-9 strategies) and LZ4-HC levels 1, 6, 9 and 12. Raw payload is also a candidate. The winner is selected by actual stored size, including the four-byte decoded-size prefix; compressed data is used only when it is strictly smaller than raw. All candidates use existing CPV compression flags, so no format version bump is needed.
 4. **Global motion prediction (v1.3).** The encoder searches for a whole-frame translation of up to eight pixels in either axis. It encodes and compresses both ordinary and motion-predicted P-frames, retaining motion only when the complete stored frame is smaller.
 
 ### Palette quality
@@ -112,7 +112,7 @@ Higher values mean stronger and more lossy filtering, not higher visual fidelity
 - --ffmpeg PATH, --ffprobe PATH: select external FFmpeg executables.
 - --self-test: run native packet, bit-packing, palette and motion tests.
 
-Run tools/cpv_convert --help for the full command-line help. The converter reports the palette size, frame counts, keyframes, duration, compressed frame counts, compression and motion savings, total file size, conversion time and packet sizes by type.
+Run tools/cpv_convert --help for the full command-line help. The converter reports the palette size, frame counts, keyframes, duration, compression codec counts and winning candidate per frame, compression and motion savings, total file size, conversion time and packet sizes by type.
 
 ## Play a CPV file on the host
 

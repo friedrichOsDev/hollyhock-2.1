@@ -374,7 +374,7 @@ The payload begins immediately after the frame header and contains exactly `payl
 
 ### 9.3 Optional independent LZ4 frame payload
 
-In CPV v1.1–v1.3, frame flag bit 0 (FRAME_FLAG_LZ4 = 0x01) indicates that the stored frame payload is a raw LZ4 block. CPV v1.2 and newer additionally support flag bit 1 (FRAME_FLAG_DEFLATE = 0x02), indicating a zlib-wrapped DEFLATE stream (which uses Huffman coding). LZ4 and DEFLATE are mutually exclusive. Either compression flag may be combined with the global-motion flag defined in Section 9.5. Each frame is compressed independently; there is no cross-frame dictionary.
+In CPV v1.1–v1.3, frame flag bit 0 (FRAME_FLAG_LZ4 = 0x01) indicates that the stored frame payload is a raw LZ4 block. CPV v1.2 and newer additionally support flag bit 1 (FRAME_FLAG_DEFLATE = 0x02), indicating a zlib-wrapped DEFLATE stream. LZ4 and DEFLATE are mutually exclusive. Either compression flag may be combined with the global-motion flag defined in Section 9.5. Each frame is compressed independently; there is no cross-frame dictionary. DEFLATE streams may use any valid compression level or strategy (including fixed Huffman, filtered, Huffman-only, or RLE); decoder behaviour is identical.
 
 For a compressed frame, the stored payload is:
 

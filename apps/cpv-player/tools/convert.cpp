@@ -800,6 +800,7 @@ static EncodedFrame encode_frame(
 struct CompressionResult {
     std::vector<uint8_t> bytes;
     uint8_t flag = 0;
+    uint8_t variant = 0; // 0 raw, 1-8 DEFLATE candidates, 9-12 LZ4-HC levels
     uint64_t saved = 0;
 };
 
@@ -810,46 +811,87 @@ static void append_u32(std::vector<uint8_t> &out, uint32_t value) {
     out.push_back(static_cast<uint8_t>(value >> 24));
 }
 
+static std::vector<uint8_t> deflate_candidate(
+    const std::vector<uint8_t> &payload, int level, int strategy
+) {
+    z_stream stream{};
+    if (deflateInit2(&stream, level, Z_DEFLATED, MAX_WBITS, 8, strategy) != Z_OK)
+        throw std::runtime_error("zlib DEFLATE initialization failed");
+    const uLong bound = deflateBound(&stream, static_cast<uLong>(payload.size()));
+    std::vector<uint8_t> output(bound);
+    stream.next_in = const_cast<Bytef *>(reinterpret_cast<const Bytef *>(payload.data()));
+    stream.avail_in = static_cast<uInt>(payload.size());
+    stream.next_out = reinterpret_cast<Bytef *>(output.data());
+    stream.avail_out = static_cast<uInt>(output.size());
+    const int status = deflate(&stream, Z_FINISH);
+    const size_t written = static_cast<size_t>(stream.total_out);
+    deflateEnd(&stream);
+    if (status != Z_STREAM_END)
+        throw std::runtime_error("zlib DEFLATE compression failed");
+    output.resize(written);
+    return output;
+}
+
 static CompressionResult compress_payload(const std::vector<uint8_t> &payload, bool enabled) {
     CompressionResult result;
-    result.bytes = payload;
+    result.bytes = payload; // Raw payload is always a candidate; choose the actual smallest.
     if (!enabled || payload.empty()) return result;
-    if (payload.size() > std::numeric_limits<uLong>::max())
+    if (payload.size() > std::numeric_limits<uInt>::max() ||
+        payload.size() > std::numeric_limits<uLong>::max())
         throw std::runtime_error("frame payload is too large for zlib");
-    uLongf deflate_bound = compressBound(static_cast<uLong>(payload.size()));
-    std::vector<uint8_t> deflate_data(deflate_bound);
-    int zret = compress2(deflate_data.data(), &deflate_bound, payload.data(),
-                         static_cast<uLong>(payload.size()), Z_BEST_COMPRESSION);
-    if (zret != Z_OK) throw std::runtime_error("zlib DEFLATE compression failed");
-    deflate_data.resize(deflate_bound);
-    std::vector<uint8_t> best;
-    best.reserve(4 + deflate_data.size());
-    append_u32(best, static_cast<uint32_t>(payload.size()));
-    best.insert(best.end(), deflate_data.begin(), deflate_data.end());
-    uint8_t best_flag = FLAG_DEFLATE;
+
+    struct DeflateConfig { int level; int strategy; uint8_t variant; };
+    // All streams remain ordinary zlib-wrapped DEFLATE and are decoder-compatible.
+    static constexpr std::array<DeflateConfig, 8> DEFLATE_CONFIGS = {{
+        {1, Z_DEFAULT_STRATEGY, 1},
+        {3, Z_DEFAULT_STRATEGY, 2},
+        {6, Z_DEFAULT_STRATEGY, 3},
+        {9, Z_DEFAULT_STRATEGY, 4},
+        {9, Z_FILTERED, 5},
+        {9, Z_HUFFMAN_ONLY, 6},
+        {9, Z_RLE, 7},
+        {9, Z_FIXED, 8},
+    }};
+
+    auto consider = [&](const std::vector<uint8_t> &compressed, uint8_t flag, uint8_t variant) {
+        // Include the four-byte uncompressed-size prefix in the comparison.
+        if (compressed.size() + 4 >= result.bytes.size()) return;
+        std::vector<uint8_t> candidate;
+        candidate.reserve(compressed.size() + 4);
+        append_u32(candidate, static_cast<uint32_t>(payload.size()));
+        candidate.insert(candidate.end(), compressed.begin(), compressed.end());
+        if (candidate.size() < result.bytes.size()) {
+            result.bytes = std::move(candidate);
+            result.flag = flag;
+            result.variant = variant;
+        }
+    };
+
+    for (const auto &config : DEFLATE_CONFIGS)
+        consider(deflate_candidate(payload, config.level, config.strategy),
+                 FLAG_DEFLATE, config.variant);
 
     if (payload.size() <= static_cast<size_t>(std::numeric_limits<int>::max())) {
-        int bound = LZ4_compressBound(static_cast<int>(payload.size()));
+        const int source_size = static_cast<int>(payload.size());
+        const int bound = LZ4_compressBound(source_size);
         if (bound > 0) {
-            std::vector<char> lz(bound);
-            int compressed = LZ4_compress_HC(
-                reinterpret_cast<const char *>(payload.data()), lz.data(),
-                static_cast<int>(payload.size()), bound, 9
-            );
-            if (compressed > 0 && static_cast<size_t>(compressed) + 4 < best.size()) {
-                best.clear();
-                append_u32(best, static_cast<uint32_t>(payload.size()));
-                best.insert(best.end(), reinterpret_cast<uint8_t *>(lz.data()),
-                            reinterpret_cast<uint8_t *>(lz.data()) + compressed);
-                best_flag = FLAG_LZ4;
+            std::vector<char> lz(static_cast<size_t>(bound));
+            static constexpr std::array<int, 4> LZ4_LEVELS = {{1, 6, 9, 12}};
+            for (size_t i = 0; i < LZ4_LEVELS.size(); ++i) {
+                const int compressed = LZ4_compress_HC(
+                    reinterpret_cast<const char *>(payload.data()), lz.data(),
+                    source_size, bound, LZ4_LEVELS[i]);
+                if (compressed > 0) {
+                    std::vector<uint8_t> candidate(
+                        reinterpret_cast<const uint8_t *>(lz.data()),
+                        reinterpret_cast<const uint8_t *>(lz.data()) + compressed);
+                    consider(candidate, FLAG_LZ4, static_cast<uint8_t>(9 + i));
+                }
             }
         }
     }
-    uint64_t saving = payload.size() > best.size() ? payload.size() - best.size() : 0;
-    if (saving < std::max<uint64_t>(16, payload.size()/100)) return result;
-    result.bytes = std::move(best);
-    result.flag = best_flag;
-    result.saved = saving;
+
+    result.saved = payload.size() - result.bytes.size();
     return result;
 }
 
@@ -1027,6 +1069,20 @@ static void write_file_header(
 static void run_self_tests() {
     if (make_seed_rgb24().size()!=108 || make_seed_palette().size()!=36)
         throw std::runtime_error("seed palette self-test failed");
+    std::vector<uint8_t> compress_test(32768);
+    for (size_t i=0;i<compress_test.size();++i)
+        compress_test[i]=static_cast<uint8_t>((i/64 + (i%13)) & 0xFF);
+    CompressionResult compression_test=compress_payload(compress_test,true);
+    if (compression_test.flag==0 || compression_test.bytes.size()>=compress_test.size() ||
+        compression_test.saved!=compress_test.size()-compression_test.bytes.size() ||
+        compression_test.bytes.size()<4)
+        throw std::runtime_error("compression portfolio self-test failed");
+    const uint32_t declared_size=static_cast<uint32_t>(compression_test.bytes[0]) |
+        (static_cast<uint32_t>(compression_test.bytes[1])<<8) |
+        (static_cast<uint32_t>(compression_test.bytes[2])<<16) |
+        (static_cast<uint32_t>(compression_test.bytes[3])<<24);
+    if (declared_size!=compress_test.size())
+        throw std::runtime_error("compression size-prefix self-test failed");
     if (index_bits(1)!=1 || index_bits(16)!=4 || index_bits(17)!=5 ||
         index_bits(64)!=6 || index_bits(128)!=7 || index_bits(256)!=8)
         throw std::runtime_error("palette index width self-test failed");
@@ -1112,6 +1168,7 @@ static void convert_video(const Options &o) {
         std::vector<std::array<uint32_t,3>> keyframes;
         PacketStats total_stats;
         uint64_t lz4_frames=0,deflate_frames=0,compression_saved=0;
+        std::array<uint64_t,13> compression_winners{};
         uint64_t motion_frames=0,motion_saved=0;
         const uint32_t key_interval=std::max<uint32_t>(1,static_cast<uint32_t>(std::llround(o.keyframe_interval*1000.0)));
         const uint16_t fill=rgb565_round(
@@ -1170,6 +1227,7 @@ static void convert_video(const Options &o) {
                             flags=static_cast<uint8_t>(motion_compressed.flag|FLAG_MOTION);
                             frame_saving=motion_compressed.saved;
                             compressed.flag=motion_compressed.flag;
+                            compressed.variant=motion_compressed.variant;
                             encoded.stats=std::move(motion_packets.stats);
                         }
                     }
@@ -1177,6 +1235,7 @@ static void convert_video(const Options &o) {
                 if(compressed.flag==FLAG_LZ4) ++lz4_frames;
                 else if(compressed.flag==FLAG_DEFLATE) ++deflate_frames;
                 compression_saved+=frame_saving;
+                ++compression_winners[compressed.variant];
 
                 uint64_t offset=write_frame_record(file,stored,type,flags,stored_count,duration);
                 if(type==FRAME_I) {
@@ -1260,6 +1319,13 @@ static void convert_video(const Options &o) {
             << "  LZ4-HC frames: " << lz4_frames << "/" << stored_count << "\n"
             << "  DEFLATE/Huffman frames: " << deflate_frames << "/" << stored_count << "\n"
             << "  Compression bytes saved: " << compression_saved << "\n"
+            << "  Compression candidate winners: raw=" << compression_winners[0]
+            << ", DEFLATE L1=" << compression_winners[1] << ", L3=" << compression_winners[2]
+            << ", L6=" << compression_winners[3] << ", L9 default=" << compression_winners[4]
+            << ", L9 filtered=" << compression_winners[5] << ", L9 Huffman-only=" << compression_winners[6]
+            << ", L9 RLE=" << compression_winners[7] << ", L9 fixed=" << compression_winners[8]
+            << ", LZ4-HC L1=" << compression_winners[9] << ", L6=" << compression_winners[10]
+            << ", L9=" << compression_winners[11] << ", L12=" << compression_winners[12] << "\n"
             << "  Global-motion frames: " << motion_frames << "/" << stored_count << "\n"
             << "  Bytes saved by global motion: " << motion_saved << "\n"
             << "  File size: " << size << " bytes (" << size/(1024.0*1024.0) << " MiB)\n"
