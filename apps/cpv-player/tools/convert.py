@@ -30,7 +30,7 @@ except ImportError:
 
 MAGIC = b"CPV\0"
 VERSION_MAJOR = 1
-VERSION_MINOR = 2
+VERSION_MINOR = 3
 
 # CPV v1.1: 64-byte file header, 20-byte frame header, 12-byte index entry.
 HEADER = struct.Struct("<4sBBHIHHHHIHHIIII20s")
@@ -45,7 +45,10 @@ MAX_RUN_LENGTH = 8191
 MAX_DELTA_MASK_LENGTH = 65535
 FRAME_FLAG_LZ4 = 0x01
 FRAME_FLAG_DEFLATE = 0x02
-FRAME_FLAGS_MASK = FRAME_FLAG_LZ4 | FRAME_FLAG_DEFLATE
+FRAME_FLAG_GLOBAL_MOTION = 0x04
+FRAME_COMPRESSION_MASK = FRAME_FLAG_LZ4 | FRAME_FLAG_DEFLATE
+FRAME_FLAGS_MASK = FRAME_COMPRESSION_MASK | FRAME_FLAG_GLOBAL_MOTION
+MAX_GLOBAL_MOTION = 8
 
 FRAME_I = 0
 FRAME_P = 1
@@ -203,13 +206,9 @@ def make_filter(
 
 
 def palette_limit_for_palette_quality(palette_quality: int) -> int:
-    """Map quality to an 8-colour minimum palette budget."""
-    if palette_quality < 10:
-        return 8
-    if palette_quality < 25:
-        return 16
+    """Map quality to the palette budgets used by the legacy seed-palette method."""
     if palette_quality < 40:
-        return 32
+        return 36
     if palette_quality < 60:
         return 64
     if palette_quality < 80:
@@ -217,31 +216,126 @@ def palette_limit_for_palette_quality(palette_quality: int) -> int:
     return 256
 
 
-# These first eight RGB565 slots are guaranteed in every CPV v1.2 palette.
-# Order is deliberate and stable for inspection/debugging.
-FIXED_BASE_PALETTE = (
-    0xF800,  # red
-    0x07E0,  # green
-    0x001F,  # blue
-    0xFFE0,  # yellow
-    0x07FF,  # cyan
-    0xF81F,  # magenta
-    0x0000,  # black
-    0xFFFF,  # white
+# Exact twelve hues used by the original cp400-cpv-player palette generator.
+LEGACY_BASE_HUES = (
+    (255, 0, 0),       # red
+    (0, 255, 0),       # green
+    (0, 0, 255),       # blue
+    (255, 255, 0),     # yellow
+    (0, 255, 255),     # cyan
+    (255, 0, 255),     # magenta
+    (255, 128, 0),     # orange
+    (255, 0, 128),     # pink
+    (0, 255, 128),     # spring green / turquoise
+    (128, 0, 255),     # violet
+    (139, 69, 19),     # brown
+    (128, 128, 128),   # grey
 )
 
 
-def merge_hybrid_palette(generated, palette_budget: int):
-    """Keep eight fixed primary colours first, then append video-derived colours."""
+def build_legacy_seed_palette() -> np.ndarray:
+    """Create the old 36-colour palette: 12 hues, each dark / normal / light."""
     require_numpy()
-    if palette_budget < len(FIXED_BASE_PALETTE) or palette_budget > 256:
-        raise ValueError("palette budget must be in the range 8..256")
-    base = np.asarray(FIXED_BASE_PALETTE, dtype=np.uint16)
+    colours: list[int] = []
+    for red, green, blue in LEGACY_BASE_HUES:
+        variants = (
+            (red // 2, green // 2, blue // 2),
+            (red, green, blue),
+            (
+                red + (255 - red) // 2,
+                green + (255 - green) // 2,
+                blue + (255 - blue) // 2,
+            ),
+        )
+        for r, g, b in variants:
+            r5 = (r * 31 + 127) // 255
+            g6 = (g * 63 + 127) // 255
+            b5 = (b * 31 + 127) // 255
+            colours.append((r5 << 11) | (g6 << 5) | b5)
+    return np.asarray(colours, dtype=np.uint16)
+
+
+def merge_legacy_seed_palette(generated, palette_budget: int) -> np.ndarray:
+    """Keep legacy seed colours first and fill remaining slots with video colours."""
+    require_numpy()
+    seed = build_legacy_seed_palette()
+    if palette_budget < seed.size or palette_budget > 256:
+        raise ValueError("palette budget must be in the range 36..256")
     generated = np.asarray(generated, dtype=np.uint16).reshape(-1)
-    merged = np.concatenate((base, generated))
+    merged = np.concatenate((seed, generated))
     _, first_indices = np.unique(merged, return_index=True)
     ordered_unique = merged[np.sort(first_indices)]
     return np.ascontiguousarray(ordered_unique[:palette_budget], dtype=np.uint16)
+
+
+def shift_frame(
+    previous, width: int, height: int, dx: int, dy: int, fill_colour: int
+):
+    """Predict the current frame by translating the previous reconstructed frame."""
+    source = np.asarray(previous, dtype=np.uint16).reshape(height, width)
+    shifted = np.full((height, width), fill_colour, dtype=np.uint16)
+    source_x0 = max(0, -dx)
+    source_y0 = max(0, -dy)
+    source_x1 = min(width, width - dx)
+    source_y1 = min(height, height - dy)
+    if source_x0 < source_x1 and source_y0 < source_y1:
+        dest_x0 = source_x0 + dx
+        dest_y0 = source_y0 + dy
+        shifted[dest_y0:dest_y0 + (source_y1-source_y0),
+                dest_x0:dest_x0 + (source_x1-source_x0)] = source[
+            source_y0:source_y1, source_x0:source_x1
+        ]
+    return shifted.reshape(-1)
+
+
+def _motion_match_count(current_2d, previous_2d, dx: int, dy: int, sample_step: int) -> int:
+    height, width = current_2d.shape
+    sx0 = max(0, -dx)
+    sy0 = max(0, -dy)
+    sx1 = min(width, width - dx)
+    sy1 = min(height, height - dy)
+    if sx0 >= sx1 or sy0 >= sy1:
+        return 0
+    source = previous_2d[sy0:sy1:sample_step, sx0:sx1:sample_step]
+    target = current_2d[sy0 + dy:sy1 + dy:sample_step,
+                        sx0 + dx:sx1 + dx:sample_step]
+    return int(np.count_nonzero(source == target))
+
+
+def estimate_global_motion(
+    current, previous, width: int, height: int, max_shift: int = MAX_GLOBAL_MOTION
+) -> tuple[int, int]:
+    """Estimate a small frame-wide translation using coarse-to-fine exact matching."""
+    current_2d = np.asarray(current, dtype=np.uint16).reshape(height, width)
+    previous_2d = np.asarray(previous, dtype=np.uint16).reshape(height, width)
+
+    best_dx = 0
+    best_dy = 0
+    best_score = _motion_match_count(current_2d, previous_2d, 0, 0, 4)
+
+    coarse_candidates = range(-max_shift, max_shift + 1, 2)
+    for dy in coarse_candidates:
+        for dx in coarse_candidates:
+            if dx == 0 and dy == 0:
+                continue
+            score = _motion_match_count(current_2d, previous_2d, dx, dy, 4)
+            if score > best_score:
+                best_score, best_dx, best_dy = score, dx, dy
+
+    coarse_dx, coarse_dy = best_dx, best_dy
+    for dy in range(max(-max_shift, coarse_dy - 1), min(max_shift, coarse_dy + 1) + 1):
+        for dx in range(max(-max_shift, coarse_dx - 1), min(max_shift, coarse_dx + 1) + 1):
+            score = _motion_match_count(current_2d, previous_2d, dx, dy, 2)
+            if score > best_score or (
+                score == best_score and abs(dx) + abs(dy) < abs(best_dx) + abs(best_dy)
+            ):
+                best_score, best_dx, best_dy = score, dx, dy
+
+    sample_count = ((height + 3) // 4) * ((width + 3) // 4)
+    if best_score - _motion_match_count(current_2d, previous_2d, 0, 0, 2) < max(4, sample_count // 100):
+        return 0, 0
+    return best_dx, best_dy
+
 
 def _run_checked(command: list[str], description: str) -> subprocess.CompletedProcess[bytes]:
     try:
@@ -251,65 +345,6 @@ def _run_checked(command: list[str], description: str) -> subprocess.CompletedPr
     except subprocess.CalledProcessError as exc:
         detail = exc.stderr.decode("utf-8", errors="replace").strip()
         raise ConversionError(f"{description} failed" + (f": {detail}" if detail else "")) from exc
-
-
-def _sample_video_histogram(
-    ffmpeg: str, source: Path, width: int, height: int, fit: str,
-    background: str, preprocess_quality: int,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Sample one processed frame per second and return RGB565 colours/counts."""
-    sample_filter = make_filter(
-        width, height, Fraction(1, 1), fit, background, preprocess_quality
-    )
-    command = [
-        ffmpeg, "-hide_banner", "-loglevel", "error", "-i", str(source),
-        "-map", "0:v:0", "-an", "-sn", "-dn", "-vf", sample_filter,
-        "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1",
-    ]
-    raw = _run_checked(command, "hybrid palette sampling").stdout
-    frame_bytes = width * height * 3
-    if not raw or len(raw) % frame_bytes:
-        raise ConversionError("FFmpeg returned an incomplete RGB sample frame")
-    rgb = np.frombuffer(raw, dtype=np.uint8).reshape(-1, 3).astype(np.uint16)
-    r = (rgb[:, 0] * 31 + 127) // 255
-    g = (rgb[:, 1] * 63 + 127) // 255
-    b = (rgb[:, 2] * 31 + 127) // 255
-    pixels = ((r << 11) | (g << 5) | b).astype(np.uint16)
-    colours, counts = np.unique(pixels, return_counts=True)
-    return colours, counts.astype(np.uint64)
-
-
-def select_hybrid_anchors(colours, counts, palette_budget: int) -> np.ndarray:
-    """Select frequent, video-derived colours near important anchor targets."""
-    if palette_budget <= 4:
-        anchor_budget = 2
-    elif palette_budget <= 16:
-        anchor_budget = 4
-    else:
-        anchor_budget = min(6, palette_budget // 4)
-    if colours.size == 0 or anchor_budget == 0:
-        return np.empty(0, dtype=np.uint16)
-
-    values = colours.astype(np.uint16)
-    r = ((values >> 11) & 31).astype(np.int16)
-    g = ((values >> 5) & 63).astype(np.int16)
-    b = (values & 31).astype(np.int16)
-    total = int(counts.sum())
-    min_count = max(2, total // 20000)
-    selected: list[int] = []
-    for target in ANCHOR_TARGETS:
-        tr, tg, tb = (target >> 11) & 31, (target >> 5) & 63, target & 31
-        distance = 3 * (r-tr)**2 + 4 * (g-tg)**2 + 2 * (b-tb)**2
-        candidates = np.flatnonzero((distance <= 900) & (counts >= min_count))
-        if candidates.size == 0:
-            continue
-        order = np.lexsort((-counts[candidates], distance[candidates]))
-        chosen = int(values[candidates[order[0]]])
-        if chosen not in selected:
-            selected.append(chosen)
-        if len(selected) >= anchor_budget:
-            break
-    return np.asarray(selected, dtype=np.uint16)
 
 
 def build_global_palette(
@@ -323,16 +358,21 @@ def build_global_palette(
     preprocess_quality: int,
     temp_dir: Path,
 ):
-    """Build a hybrid global palette with eight guaranteed base colours."""
+    """Reproduce the legacy 36-colour seed palette and let FFmpeg fill the rest."""
     require_numpy()
-    max_colours = palette_limit_for_palette_quality(palette_quality)
+    palette_budget = palette_limit_for_palette_quality(palette_quality)
+    seed_palette = build_legacy_seed_palette()
+    remaining = palette_budget - int(seed_palette.size)
+    if remaining <= 0:
+        return seed_palette, palette_budget
+
     palette_path = temp_dir / "palette.png"
     sample_filter = make_filter(
         width, height, Fraction(1, 1), fit, background, preprocess_quality
     )
     video_filter = (
         sample_filter
-        + f",palettegen=max_colors={max(2, max_colours - len(FIXED_BASE_PALETTE))}:stats_mode=full:reserve_transparent=0"
+        + f",palettegen=max_colors={remaining}:stats_mode=full:reserve_transparent=0"
     )
     command = [
         ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
@@ -355,10 +395,11 @@ def build_global_palette(
     green = (rgb[:, 1] * 63 + 127) // 255
     blue = (rgb[:, 2] * 31 + 127) // 255
     generated = ((red << 11) | (green << 5) | blue).astype(np.uint16)
-    palette = merge_hybrid_palette(generated, max_colours)
-    if palette.size < len(FIXED_BASE_PALETTE) or palette.size > max_colours:
-        raise ConversionError(f"invalid hybrid global palette size: {palette.size}")
-    return palette, max_colours
+    palette = merge_legacy_seed_palette(generated, palette_budget)
+    if palette.size < seed_palette.size or palette.size > palette_budget:
+        raise ConversionError(f"invalid legacy-seed global palette size: {palette.size}")
+    return palette, palette_budget
+
 
 def build_rgb565_lookup(palette):
     """Build one 65,536-entry lookup table, avoiding a 256-colour search per pixel."""
