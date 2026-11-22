@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -17,6 +18,7 @@ CONVERTER = TOOLS / "cpv_convert"
 PLAY_SPEC = importlib.util.spec_from_file_location("cpv_play", TOOLS / "play.py")
 play = importlib.util.module_from_spec(PLAY_SPEC)
 assert PLAY_SPEC and PLAY_SPEC.loader
+sys.modules[PLAY_SPEC.name] = play
 PLAY_SPEC.loader.exec_module(play)
 
 

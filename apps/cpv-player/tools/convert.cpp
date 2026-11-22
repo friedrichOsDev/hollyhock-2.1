@@ -1032,13 +1032,13 @@ static void run_self_tests() {
         throw std::runtime_error("palette index width self-test failed");
     std::vector<uint8_t> values={0,1,2,3,4,5,6,7,8,9,10};
     std::vector<uint8_t> packed;
-    pack_indices(packed,values,0,values.size(),3);
+    pack_indices(packed,values,0,values.size(),4);
     std::vector<uint8_t> decoded;
     uint32_t acc=0; unsigned have=0;
     for (uint8_t b:packed) {
         acc |= static_cast<uint32_t>(b)<<have; have+=8;
-        while(have>=3 && decoded.size()<values.size()) {
-            decoded.push_back(static_cast<uint8_t>(acc&7)); acc>>=3; have-=3;
+        while(have>=4 && decoded.size()<values.size()) {
+            decoded.push_back(static_cast<uint8_t>(acc&15)); acc>>=4; have-=4;
         }
     }
     if (decoded!=values) throw std::runtime_error("bit-packing self-test failed");
