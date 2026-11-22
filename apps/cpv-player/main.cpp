@@ -287,7 +287,10 @@ void EncodeCalibration(uint32_t count, uint8_t seconds, uint8_t data[32]) {
     data[position++] = ';';
     AppendDecimalField(data, position, seconds);
     AppendDecimalField(data, position, count);
-    AppendDecimalField(data, position, ~count);
+    char inverse[12];
+    AppendNumber(~count, inverse, sizeof(inverse));
+    for (unsigned i = 0; inverse[i]; ++i)
+        data[position++] = static_cast<uint8_t>(inverse[i]);
     data[position] = 0;
 }
 bool DecodeCalibration(const uint8_t data[32], uint8_t seconds,
@@ -338,13 +341,19 @@ void WaitForCalibrationResult(UI::Framebuffer &screen, bool saved,
                               uint32_t count) {
     char number[12]; AppendNumber(count,number,sizeof(number));
     screen.Clear(UI::Colors::Black);
-    screen.DrawText(12,28,"CALIBRATION RESULT",UI::Colors::Yellow);
+    screen.DrawText(12,28,count ? "CALIBRATION RESULT" : "CALIBRATION FAILED",
+                    count ? UI::Colors::Yellow : UI::Colors::Red);
     screen.DrawLine(12,42,screen.Width()-12,42,UI::Colors::Gray);
-    screen.DrawText(12,84,"EVENTS IN 10 SECONDS:",UI::Colors::Gray);
-    screen.DrawText(12,116,number,UI::Colors::White);
-    screen.DrawText(12,164,"Playback pacing updated.",UI::Colors::Green);
-    screen.DrawText(12,196,saved ? "PROFILE SAVED" : "SAVE FAILED - RAM ONLY",
-                    saved ? UI::Colors::Green : UI::Colors::Yellow);
+    if (count) {
+        screen.DrawText(12,84,"EVENTS IN 10 SECONDS:",UI::Colors::Gray);
+        screen.DrawText(12,116,number,UI::Colors::White);
+        screen.DrawText(12,164,"Playback pacing updated.",UI::Colors::Green);
+        screen.DrawText(12,196,saved ? "PROFILE SAVED" : "SAVE FAILED - RAM ONLY",
+                        saved ? UI::Colors::Green : UI::Colors::Yellow);
+    } else {
+        screen.DrawText(12,92,"No valid timer rate measured.",UI::Colors::White);
+        screen.DrawText(12,124,"Check stopwatch and try again.",UI::Colors::Gray);
+    }
     screen.DrawText(12,screen.Height()-40,"EXE: RETURN TO SETTINGS",UI::Colors::Gray);
     screen.Present();
     bool latched=false;

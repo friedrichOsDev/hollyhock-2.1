@@ -120,7 +120,13 @@ int main() {
     clock.ResetFrame(250U);
     Check(clock.Credit()==0U,"seek reset discards previous fractional credit");
     Check(!clock.Configure(0U,10U) && !clock.Configure(20U,0U) &&
-          !clock.Configure(20U,61U),"invalid calibration values are rejected");
+          !clock.Configure(20U,61U) && !clock.Configure(10001U,10U),
+          "invalid calibration values are rejected");
+    Check(clock.Configure(10000U,10U),"upper calibration-rate bound is accepted");
+    clock.ResetFrame(0xFFFFFFFFU);
+    clock.AddTimerEvent();
+    Check(!clock.FrameDue(),
+          "large frame-duration multiplication saturates without division helpers");
     printf("\n%u checks, %u failure(s)\n", checks, failures);
     return failures == 0 ? 0 : 1;
 }

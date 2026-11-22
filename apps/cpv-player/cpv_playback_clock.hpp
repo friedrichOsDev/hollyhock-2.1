@@ -20,10 +20,27 @@ public:
     }
     void SetNextFrameDuration(uint32_t durationMs) {
         if (!m_configured) { m_frameCost=0xFFFFFFFFU; m_frameActive=false; return; }
-        if (!durationMs) durationMs=1U;
-        if (durationMs > 0xFFFFFFFFU/m_timerEvents) m_frameCost=0xFFFFFFFFU;
-        else m_frameCost=durationMs*m_timerEvents;
-        if (!m_frameCost) m_frameCost=1U;
+        if (!durationMs) durationMs = 1U;
+        uint32_t multiplier = m_timerEvents;
+        uint32_t multiplicand = durationMs;
+        uint32_t product = 0;
+        while (multiplier) {
+            if (multiplier & 1U) {
+                if (product > 0xFFFFFFFFU - multiplicand) {
+                    product = 0xFFFFFFFFU;
+                    break;
+                }
+                product += multiplicand;
+            }
+            multiplier >>= 1;
+            if (multiplier) {
+                if (multiplicand > 0x7FFFFFFFU)
+                    multiplicand = 0xFFFFFFFFU;
+                else
+                    multiplicand <<= 1;
+            }
+        }
+        m_frameCost = product ? product : 1U;
         m_frameActive=true;
     }
     void AddTimerEvent() {
