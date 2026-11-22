@@ -324,13 +324,16 @@ def estimate_global_motion(
 
     # Coarse grid: small enough to search every integer vector efficiently.
     coarse_step = max(8, max(width, height) // 32)
-    coarse_candidates = range(-max_shift, max_shift + 1)
+    max_dx = min(max_shift, width - 1)
+    max_dy = min(max_shift, height - 1)
+    coarse_candidates_x = range(-max_dx, max_dx + 1)
+    coarse_candidates_y = range(-max_dy, max_dy + 1)
     coarse_dx = coarse_dy = 0
     coarse_score = _motion_match_count(
         current_2d, previous_2d, 0, 0, coarse_step
     )
-    for dy in coarse_candidates:
-        for dx in coarse_candidates:
+    for dy in coarse_candidates_y:
+        for dx in coarse_candidates_x:
             if dx == 0 and dy == 0:
                 continue
             score = _motion_match_count(
@@ -347,10 +350,10 @@ def estimate_global_motion(
         current_2d, previous_2d, 0, 0, fine_step
     )
     best_score = zero_score
-    for dy in range(max(-max_shift, coarse_dy - 1),
-                    min(max_shift, coarse_dy + 1) + 1):
-        for dx in range(max(-max_shift, coarse_dx - 1),
-                        min(max_shift, coarse_dx + 1) + 1):
+    for dy in range(max(-max_dy, coarse_dy - 1),
+                    min(max_dy, coarse_dy + 1) + 1):
+        for dx in range(max(-max_dx, coarse_dx - 1),
+                        min(max_dx, coarse_dx + 1) + 1):
             score = _motion_match_count(
                 current_2d, previous_2d, dx, dy, fine_step
             )
