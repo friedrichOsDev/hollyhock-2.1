@@ -233,10 +233,10 @@ LEGACY_BASE_HUES = (
 )
 
 
-def build_legacy_seed_palette() -> np.ndarray:
-    """Create the old 36-colour palette: 12 hues, each dark / normal / light."""
+def build_legacy_seed_rgb24() -> bytes:
+    """Create the exact 6x6 RGB888 seed image used by the legacy converter."""
     require_numpy()
-    colours: list[int] = []
+    pixels: list[int] = []
     for red, green, blue in LEGACY_BASE_HUES:
         variants = (
             (red // 2, green // 2, blue // 2),
@@ -248,11 +248,19 @@ def build_legacy_seed_palette() -> np.ndarray:
             ),
         )
         for r, g, b in variants:
-            r5 = (r * 31 + 127) // 255
-            g6 = (g * 63 + 127) // 255
-            b5 = (b * 31 + 127) // 255
-            colours.append((r5 << 11) | (g6 << 5) | b5)
-    return np.asarray(colours, dtype=np.uint16)
+            pixels.extend((r, g, b))
+    return bytes(pixels)
+
+
+def build_legacy_seed_palette() -> np.ndarray:
+    """Create the old 36-colour palette: 12 hues, each dark / normal / light."""
+    require_numpy()
+    rgb = np.frombuffer(build_legacy_seed_rgb24(), dtype=np.uint8).reshape(-1, 3).astype(np.uint16)
+    r5 = (rgb[:, 0] * 31 + 127) // 255
+    g6 = (rgb[:, 1] * 63 + 127) // 255
+    b5 = (rgb[:, 2] * 31 + 127) // 255
+    colours = ((r5 << 11) | (g6 << 5) | b5).astype(np.uint16)
+    return colours
 
 
 def merge_legacy_seed_palette(generated, palette_budget: int) -> np.ndarray:
@@ -356,30 +364,44 @@ def build_global_palette(
     background: str,
     palette_quality: int,
     preprocess_quality: int,
+    fps: Fraction,
     temp_dir: Path,
 ):
-    """Reproduce the legacy 36-colour seed palette and let FFmpeg fill the rest."""
+    """Use the original 6x6 seed image as a real FFmpeg palette-generation input."""
     require_numpy()
     palette_budget = palette_limit_for_palette_quality(palette_quality)
     seed_palette = build_legacy_seed_palette()
-    remaining = palette_budget - int(seed_palette.size)
-    if remaining <= 0:
-        return seed_palette, palette_budget
-
+    seed_rgb24 = build_legacy_seed_rgb24()
     palette_path = temp_dir / "palette.png"
-    sample_filter = make_filter(
-        width, height, Fraction(1, 1), fit, background, preprocess_quality
+
+    video_filter = make_filter(
+        width, height, fps, fit, background, preprocess_quality
     )
-    video_filter = (
-        sample_filter
-        + f",palettegen=max_colors={remaining}:stats_mode=full:reserve_transparent=0"
+    filter_graph = (
+        f"[0:v]{video_filter}[video];"
+        f"[1:v]scale={width}:-1:flags=neighbor[seed];"
+        "[video][seed]vstack=inputs=2:shortest=0[combined];"
+        f"[combined]palettegen=max_colors={palette_budget}:"
+        "stats_mode=full:reserve_transparent=0[palette]"
     )
     command = [
         ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
-        "-i", str(source), "-map", "0:v:0", "-an", "-sn", "-dn",
-        "-vf", video_filter, "-frames:v", "1", str(palette_path),
+        "-i", str(source),
+        "-f", "rawvideo", "-pixel_format", "rgb24", "-video_size", "6x6",
+        "-framerate", "1", "-i", "pipe:0",
+        "-filter_complex", filter_graph,
+        "-map", "[palette]", "-frames:v", "1", str(palette_path),
     ]
-    _run_checked(command, "global palette generation")
+    try:
+        result = subprocess.run(
+            command, input=seed_rgb24, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            check=True,
+        )
+    except FileNotFoundError as exc:
+        raise ConversionError(f"palette generation: executable not found: {ffmpeg}") from exc
+    except subprocess.CalledProcessError as exc:
+        detail = exc.stderr.decode("utf-8", errors="replace").strip()
+        raise ConversionError("seeded FFmpeg palette generation failed" + (f": {detail}" if detail else "")) from exc
 
     extract = [
         ffmpeg, "-hide_banner", "-loglevel", "error",
@@ -395,6 +417,9 @@ def build_global_palette(
     green = (rgb[:, 1] * 63 + 127) // 255
     blue = (rgb[:, 2] * 31 + 127) // 255
     generated = ((red << 11) | (green << 5) | blue).astype(np.uint16)
+
+    # Exact legacy colours always occupy the first 36 entries. FFmpeg's
+    # seed-weighted palette fills the remaining portion of the configured budget.
     palette = merge_legacy_seed_palette(generated, palette_budget)
     if palette.size < seed_palette.size or palette.size > palette_budget:
         raise ConversionError(f"invalid legacy-seed global palette size: {palette.size}")
@@ -891,7 +916,7 @@ def convert(args: argparse.Namespace) -> None:
             palette, palette_limit = build_global_palette(
                 ffmpeg, source, args.width, args.height, args.fit,
                 args.background, args.palette_quality, args.preprocess_quality,
-                Path(palette_dir),
+                fps, Path(palette_dir),
             )
             lookup = build_rgb565_lookup(palette)
             print(
