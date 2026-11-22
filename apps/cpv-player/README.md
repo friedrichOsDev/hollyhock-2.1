@@ -80,8 +80,6 @@ The converter separates colour quantisation from pre-processing. Adjust these in
 | Palette quality | Palette budget | Behaviour |
 |---:|---:|---|
 | 0–39 | 36 legacy seed colours | Strong colour reduction |
-
-
 | 40–59 | 64 colours | Balanced colour reduction |
 | 60–79 | 128 colours | Higher colour fidelity |
 | 80–99 | 256 colours | Highest palette budget |
@@ -151,7 +149,7 @@ Controls:
 - **Home**: jump to the beginning.
 - **End**: jump to the end.
 
-The preview player requires a working graphical desktop session and Tkinter. It is a host-side reference decoder, not part of the calculator application.
+The preview player requires a working graphical desktop session and Tkinter. It is a host-side reference decoder. The calculator-side decoding implementation must mirror the global-motion operation before v1.3 motion frames can be played on-device.
 
 ## CPV v1 format
 
@@ -159,4 +157,4 @@ See [cpv_v1.md](cpv_v1.md) for the complete byte-level container, packet, encode
 
 CPV v1.3 uses a 64-byte little-endian file header, one global RGB565 palette, 20-byte frame headers, four primary packet types (INDEX_LITERAL, INDEX_REPEAT, SKIP, RAW565), the DELTA_MASK SKIP extension, optional independent LZ4 or DEFLATE frame payloads, optional global-motion P-frame prediction, I/P-frames, and a 12-byte keyframe index entry format. The file header and frame-header sizes remain unchanged from v1.0; the version minor field is 3.
 
-The host player accepts CPV v1.0, v1.1, v1.2 and v1.3. Version 1.0 literals use one byte per index and do not support DELTA_MASK or compressed frame flags. Version 1.1 supports LZ4 only; version 1.2 adds DEFLATE; version 1.3 adds global motion. New conversions use v1.3. Neither version is backward-compatible with the legacy `CP` format or the earlier experimental tile-based CPV draft. Those files MUST be converted again with this version of `convert.py`.
+The host player accepts CPV v1.0, v1.1, v1.2 and v1.3. Version 1.0 literals use one byte per index and do not support DELTA_MASK or compressed frame flags. Version 1.1 supports LZ4 only; version 1.2 adds DEFLATE; version 1.3 adds global motion. New conversions use v1.3. The calculator-side decoder must implement the v1.3 global-motion flag before playing frames that use this prediction. Neither version is backward-compatible with the legacy `CP` format or the earlier experimental tile-based CPV draft. Those files MUST be converted again with this version of `convert.py`.
