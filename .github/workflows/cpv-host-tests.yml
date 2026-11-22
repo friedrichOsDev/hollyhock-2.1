@@ -43,6 +43,12 @@ jobs:
             -Wno-builtin-declaration-mismatch -Wno-main -Wall -Wextra -Werror \
             -Isdk/include -Iui/include -Iapps/cpv-player \
             -c apps/cpv-player/main.cpp -o /tmp/cpv-main.o
+      - name: Calculator event-countdown tests
+        run: |
+          g++ -std=c++11 -Wall -Wextra -Werror \
+            apps/cpv-player/tools/test_playback_events.cpp \
+            -o /tmp/cpv-playback-events-test
+          /tmp/cpv-playback-events-test
       - name: Calculator DEFLATE and LZ4 decoder tests
         run: |
           g++ -std=c++11 -Wall -Wextra -Werror \

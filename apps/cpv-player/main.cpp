@@ -1,6 +1,7 @@
 #include <appdef.hpp>
 #include <ui/ui.hpp>
 #include "cpv_decoder.hpp"
+#include "cpv_playback_events.hpp"
 
 APP_NAME("CPV Video Player")
 APP_DESCRIPTION("CPV v1.3 video player for fx-CP400")
@@ -9,17 +10,8 @@ APP_VERSION("3.2")
 
 namespace {
 
-// No reliable public monotonic timer is currently exposed by this SDK.
-// Playback pacing is deliberately disabled until hardware timing is added.
-static const uint32_t kSpinIterationsPerMs = 0U;
-static const uint32_t kWaitSliceMs = 10U;
+// Playback is paced by discrete EVENT_TIMER events, not elapsed time.
 static const uint32_t kSeekStepMs = 5000U;
-
-void WaitMilliseconds(uint32_t milliseconds) {
-    volatile uint32_t iterations = milliseconds * kSpinIterationsPerMs;
-    while (iterations != 0)
-        --iterations;
-}
 
 void AppendNumber(uint32_t value, char *out, unsigned capacity) {
     if (!out || capacity == 0)
@@ -50,11 +42,11 @@ struct PlaybackState {
     bool redraw;
     bool touchLatched;
     uint16_t latchedKey;
-    uint32_t remainingMs;
+    uint32_t remainingEvents;
     uint32_t pollCount;
     uint32_t emptyPollCount;
     uint32_t timerEventCount;
-    uint32_t advanceCount;
+    uint32_t eventStepCount;
     const char *lastInput;
     const char *phase;
     uint32_t workCurrent;
@@ -67,9 +59,9 @@ struct PlaybackState {
 
     PlaybackState()
         : paused(false), ended(false), exit(false), redraw(true),
-          touchLatched(false), latchedKey(0), remainingMs(0),
+          touchLatched(false), latchedKey(0), remainingEvents(0),
           pollCount(0), emptyPollCount(0), timerEventCount(0),
-          advanceCount(0), lastInput("START"), phase("START"),
+          eventStepCount(0), lastInput("START"), phase("START"),
           workCurrent(0), workTotal(0), lastRawType(0), lastKeyCode(0),
           lastRawAction(0), lastTouchX(0), lastTouchY(0) {}
 };
@@ -153,7 +145,7 @@ void DrawDebugPage(UI::Framebuffer &screen, const CPV::Decoder &decoder,
     x = 8;
     DrawInlineNumber(screen, x, 80, "FRAME:",
                      decoder.HasFrame() ? decoder.CurrentFrame() + 1U : 0U);
-    DrawInlineNumber(screen, x, 80, "LEFT:", state.remainingMs);
+    DrawInlineNumber(screen, x, 80, "EVLEFT:", state.remainingEvents);
 
     x = 8;
     DrawInlineNumber(screen, x, 92, "READ:", decoder.LastReadBytes());
@@ -177,7 +169,7 @@ void DrawDebugPage(UI::Framebuffer &screen, const CPV::Decoder &decoder,
 
     x = 8;
     DrawInlineNumber(screen, x, 140, "TICK:", state.timerEventCount);
-    DrawInlineNumber(screen, x, 140, "STEP:", state.advanceCount);
+    DrawInlineNumber(screen, x, 140, "STEP:", state.eventStepCount);
 
     const uint8_t compression = decoder.LastCompression();
     const char *codec = compression == 1 ? "LZ4" :
@@ -233,8 +225,6 @@ void DrawError(const char *title, const char *message) {
         if (result == 1 && event.type == UI::EventSystem &&
             event.systemEvent == UI::SystemActionBarEscape)
             done = true;
-        if (result == 0)
-            WaitMilliseconds(10);
     }
 }
 
@@ -302,20 +292,18 @@ void SeekRelative(CPV::Decoder &decoder, int32_t delta,
     state.phase = "SEEK";
     state.lastInput = delta < 0 ? "SEEK BACK" : "SEEK FORWARD";
     if (decoder.Seek(target)) {
-        state.remainingMs = decoder.CurrentFrameDurationMs();
+        state.remainingEvents = CPV::EventStepsForFrameDuration(
+                decoder.CurrentFrameDurationMs(),
+                decoder.FpsNumerator(), decoder.FpsDenominator());
         state.redraw = true;
         state.ended = false;
     }
 }
 
-void AdvancePlaybackSlice(PlaybackState &state) {
-    if (state.paused || state.ended)
-        return;
-    ++state.advanceCount;
-    if (state.remainingMs > kWaitSliceMs)
-        state.remainingMs -= kWaitSliceMs;
-    else
-        state.remainingMs = 0;
+void AdvancePlaybackEvent(PlaybackState &state) {
+    if (CPV::ConsumePlaybackEventStep(&state.remainingEvents,
+                                      state.paused, state.ended))
+        ++state.eventStepCount;
 }
 
 void TogglePlayback(PlaybackState &state, CPV::Decoder &decoder) {
@@ -325,7 +313,9 @@ void TogglePlayback(PlaybackState &state, CPV::Decoder &decoder) {
             state.ended = false;
             state.paused = false;
             state.redraw = true;
-            state.remainingMs = decoder.CurrentFrameDurationMs();
+            state.remainingEvents = CPV::EventStepsForFrameDuration(
+                decoder.CurrentFrameDurationMs(),
+                decoder.FpsNumerator(), decoder.FpsDenominator());
             state.lastInput = "RESTART";
         }
     } else {
@@ -443,7 +433,9 @@ void PlayVideo(UI::Application &app, const char *path,
         return;
     }
 
-    state.remainingMs = decoder.CurrentFrameDurationMs();
+    state.remainingEvents = CPV::EventStepsForFrameDuration(
+                decoder.CurrentFrameDurationMs(),
+                decoder.FpsNumerator(), decoder.FpsDenominator());
     state.phase = "PLAYBACK READY";
     state.workCurrent = 0;
     state.workTotal = 0;
@@ -456,13 +448,15 @@ void PlayVideo(UI::Application &app, const char *path,
             state.redraw = false;
         }
 
-        if (!state.paused && !state.ended && state.remainingMs == 0) {
+        if (!state.paused && !state.ended && state.remainingEvents == 0) {
             if (decoder.AtEnd()) {
                 if (repeatPlayback) {
                     state.phase = "REPEAT SEEK";
                     if (decoder.Seek(0)) {
                         state.redraw = true;
-                        state.remainingMs = decoder.CurrentFrameDurationMs();
+                        state.remainingEvents = CPV::EventStepsForFrameDuration(
+                decoder.CurrentFrameDurationMs(),
+                decoder.FpsNumerator(), decoder.FpsDenominator());
                     } else {
                         state.ended = true;
                         state.redraw = true;
@@ -480,7 +474,9 @@ void PlayVideo(UI::Application &app, const char *path,
                 break;
             }
             state.redraw = true;
-            state.remainingMs = decoder.CurrentFrameDurationMs();
+            state.remainingEvents = CPV::EventStepsForFrameDuration(
+                decoder.CurrentFrameDurationMs(),
+                decoder.FpsNumerator(), decoder.FpsDenominator());
             state.lastInput = "FRAME DECODED";
             continue;
         }
@@ -496,7 +492,7 @@ void PlayVideo(UI::Application &app, const char *path,
             HandleEvent(event, decoder, state, screen.Width());
             if (event.type == UI::EventTimer) {
                 ++state.timerEventCount;
-                AdvancePlaybackSlice(state);
+                AdvancePlaybackEvent(state);
             }
 
             if (state.redraw && !state.exit) {
@@ -513,9 +509,13 @@ void PlayVideo(UI::Application &app, const char *path,
                               state.workCurrent, state.workTotal);
             }
         } else {
+            // Empty polls are diagnostics only; they are not playback ticks.
             ++state.emptyPollCount;
-            WaitMilliseconds(kWaitSliceMs);
-            AdvancePlaybackSlice(state);
+            if (debugMode && !state.exit &&
+                (state.emptyPollCount & 0x0FFFU) == 0U) {
+                DrawDebugPage(screen, decoder, state, state.phase,
+                              state.workCurrent, state.workTotal);
+            }
         }
     }
 
