@@ -1097,10 +1097,10 @@ The desktop encoder and calculator decoder have different responsibilities. Pale
 
 ## 19. Compatibility and versioning
 
-CPV v1.1 requires:
+CPV v1.1 and v1.2 require:
 
 - Major version 1.
-- Minor version 1 for bit-packed palette literals, DELTA_MASK, and optional per-frame LZ4. Minor version 2 adds optional DEFLATE/Huffman-coded frame payloads.
+- Minor version 1 enables bit-packed palette literals, DELTA_MASK, and optional per-frame LZ4. Minor version 2 adds optional DEFLATE/Huffman-coded frame payloads.
 - Minor version 0 files retain the original byte-index packet semantics and have no compression flags.
 - A 64-byte file header.
 - A 20-byte frame header.
@@ -1111,7 +1111,7 @@ CPV v1.1 requires:
 
 A decoder MUST reject unknown major versions.
 
-A strict v1.0 decoder MUST reject a non-zero frame flag, DELTA_MASK sentinel, or other v1.1-only encoding. A v1.2 decoder MUST accept v1.0 and v1.1 files by using eight-bit INDEX_LITERAL values and rejecting v1.1-only flags and packets in minor version 0. Unknown frame flag bits MUST be rejected. Any future change that alters the container header, reconstruction model, or core packet grammar requires a new major version.
+A strict v1.0 decoder MUST reject a non-zero frame flag, DELTA_MASK sentinel, or other v1.1-only encoding. A v1.2 decoder MUST accept v1.0 and v1.1 files by using eight-bit INDEX_LITERAL values in minor version 0 and rejecting DEFLATE flags in minor versions below 2. Unknown frame flag bits MUST be rejected. Any future change that alters the container header, reconstruction model, or core packet grammar requires a new major version.
 
 ---
 
