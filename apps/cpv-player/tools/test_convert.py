@@ -66,7 +66,7 @@ class PackingTests(unittest.TestCase):
         import numpy as np
         for width in range(1, 9):
             maximum = (1 << width) - 1
-            values = np.array([0, 1, maximum, maximum // 2, 3, 7], dtype=np.uint8)
+            values = np.array([0, maximum, maximum // 2, min(1, maximum), max(0, maximum - 1)], dtype=np.uint8)
             packed = convert.pack_palette_indices(values, width)
             bits = np.unpackbits(np.frombuffer(packed, dtype=np.uint8), bitorder="little")
             recovered = []
