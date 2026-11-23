@@ -15,6 +15,7 @@ const uint16_t EVENT_ACTBAR_SWAP = 0x1004;
 const uint16_t EVENT_ACTBAR_ROTATE = 0x1005;
 const uint16_t EVENT_ACTBAR_ESC = 0x3009;
 const uint16_t EVENT_ACTBAR_SETTINGS = 0x300A;
+const uint16_t EVENT_TOUCH = 0x4000;
 /**
  * @brief Timer notification event returned by GetInput().
  *
