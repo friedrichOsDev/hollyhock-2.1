@@ -726,6 +726,8 @@ void PlayVideo(UI::Application &app, const char *path,
                         ++state.framesDecodedTotal;
                         state.redraw = true;
                         state.lastInput = "FRAME DECODED";
+                        UI::Input::Poll(&event);
+                        HandleEvent(event, decoder, state, screen.Width(), clock);
                     }
                     if (!state.exit && !state.ended) {
                         if (clock.FrameDue()) state.phase = "DECODE BACKLOG";
