@@ -2,7 +2,10 @@
 *.o
 *.hhk
 *.bin
-apps/cpv-player/tools/cpv_convert
+tools/cpv_convert
+tools/*.cpv
+tools/*.mp4
+tools/benchmarks
 
 # some temporary files under wsl
 *~
