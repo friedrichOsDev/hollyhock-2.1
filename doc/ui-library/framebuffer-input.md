@@ -56,7 +56,7 @@ if (screen.Begin()) {
 
 Drawing requires an active framebuffer. Methods return false for an inactive framebuffer or invalid dimensions/pointers; a valid rectangle that lies entirely outside the display is a successful no-op. Pixel writes outside the display are skipped. Rectangles are clipped to the visible area. DrawLine() accepts endpoints only in the range -16383 to 16383 on each axis; it rasterizes the bounded line and writes only pixels that lie inside the LCD. It does not allocate a temporary image or use a floating-point clipping step.
 
-Drawing modifies VRAM immediately. Present() calls LCD_Refresh(); it does not copy from a second buffer.
+Drawing modifies VRAM immediately. BlitRGB565() copies a caller-owned RGB565 raster directly into VRAM, supports integer nearest-neighbour scaling, clips at the LCD edges, and performs no allocation. Source dimensions must be within 1..528 by 1..320; scale must be 1..64. Present() calls LCD_Refresh(); it does not copy from a second buffer.
 
 ## Built-in font
 
@@ -101,12 +101,27 @@ Return values:
 | EventTouch | x, y, touchAction, rawAction |
 | EventSystem | systemEvent |
 | EventUnknown | rawType |
+| EventTimer | rawType (SDK `EVENT_TIMER`, value 5) |
 
 Touch coordinates are passed through unchanged. They may be negative or outside the display; validate them before using them for drawing.
 
 Key actions are KeyPressed, KeyHeld, and KeyReleased. Touch actions are TouchDown, TouchDrag, TouchUp, and TouchActionBar. System events include action-bar resize, swap, rotate, escape, and settings.
 
-The SDK documents single-touch data in EVENT_TOUCH. Multi-touch is not exposed by this wrapper. Unknown SDK event types are retained as EventUnknown with their raw type.
+The SDK documents single-touch data in EVENT_TOUCH. Multi-touch is not exposed by this wrapper. SDK `EVENT_TIMER` is mapped to EventTimer, allowing applications to use the SDK timer notifications as playback or UI ticks. Other unknown SDK event types are retained as EventUnknown with their raw type.
+
+### Measured EVENT_TIMER cadence
+
+On the tested fx-CP400 running Hollyhock 2.1, a 10.00-second interval measured
+with an external stopwatch produced **exactly 20 received `EVENT_TIMER`
+notifications**, corresponding to an observed rate of **2.0 notifications per
+second**.
+
+This is a measurement of events received in that setup; it is not a documented
+timer period or a frequency guarantee for every calculator, OS/runtime version,
+or application workload. `Input::Poll()` is non-blocking and returns at most
+one event per call. Do not treat the event count as elapsed milliseconds.
+For timing-sensitive playback, count timer notifications over a known external
+interval and calibrate on the actual target device.
 
 Poll() does not wait when there is no event. Applications can poll from their own event loop and call Framebuffer::Present() after drawing changes.
 

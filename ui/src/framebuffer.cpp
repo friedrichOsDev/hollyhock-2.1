@@ -213,6 +213,42 @@ bool Framebuffer::SetPixel(int x, int y, Color color) {
     return PutPixel(x, y, color);
 }
 
+bool Framebuffer::BlitRGB565(int x, int y, const uint16_t *source,
+                             int sourceWidth, int sourceHeight, int scale) {
+    if (!m_active || !m_pixels || !source ||
+        sourceWidth <= 0 || sourceWidth > 528 ||
+        sourceHeight <= 0 || sourceHeight > 320 ||
+        scale <= 0 || scale > 64 ||
+        x < -kMaximumCoordinate || x > kMaximumCoordinate ||
+        y < -kMaximumCoordinate || y > kMaximumCoordinate)
+        return false;
+
+    for (int sy = 0; sy < sourceHeight; ++sy) {
+        const int targetY = y + sy * scale;
+        const int firstY = targetY < 0 ? 0 : targetY;
+        const int endCandidateY = targetY + scale;
+        const int endY = endCandidateY > m_height ? m_height : endCandidateY;
+        if (firstY >= endY)
+            continue;
+        for (int dy = firstY; dy < endY; ++dy) {
+            const uint32_t row = static_cast<uint32_t>(dy) * static_cast<uint32_t>(m_width);
+            for (int sx = 0; sx < sourceWidth; ++sx) {
+                const int targetX = x + sx * scale;
+                const int firstX = targetX < 0 ? 0 : targetX;
+                const int endCandidateX = targetX + scale;
+                const int endX = endCandidateX > m_width ? m_width : endCandidateX;
+                if (firstX >= endX)
+                    continue;
+                const uint16_t color = source[static_cast<uint32_t>(sy) * static_cast<uint32_t>(sourceWidth) + static_cast<uint32_t>(sx)];
+                uint32_t destination = row + static_cast<uint32_t>(firstX);
+                for (int dx = firstX; dx < endX; ++dx)
+                    m_pixels[destination++] = color;
+            }
+        }
+    }
+    return true;
+}
+
 bool Framebuffer::FillRect(int x, int y, int width, int height, Color color) {
     if (!m_active || !m_pixels || width <= 0 || height <= 0)
         return false;

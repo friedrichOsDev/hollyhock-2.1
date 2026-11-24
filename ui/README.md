@@ -22,7 +22,7 @@ Link sdk/sdk.o and ui/ui.o into your application and include sdk/include and ui/
 ## Public APIs
 
 - ui/application.hpp — per-menu Native, Framebuffer, or Custom renderers, callbacks, and settings.
-- ui/framebuffer.hpp — bounded RGB565 drawing directly into LCD VRAM.
+- ui/framebuffer.hpp — bounded RGB565 drawing and scaled image blitting directly into LCD VRAM.
 - ui/input.hpp — normalized key, touch, system, and unknown events.
 - ui/filesystem.hpp — read-only file and directory access.
 - ui/storage.hpp — MCS-backed PersistentStore.

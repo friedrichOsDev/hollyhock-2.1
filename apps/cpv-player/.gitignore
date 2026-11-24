@@ -2,6 +2,10 @@
 *.o
 *.hhk
 *.bin
+tools/cpv_convert
+tools/*.cpv
+tools/*.mp4
+tools/benchmarks
 
 # some temporary files under wsl
 *~

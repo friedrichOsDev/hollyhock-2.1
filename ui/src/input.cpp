@@ -58,6 +58,13 @@ int Input::Poll(Event *event) {
 
     event->rawType = raw.type;
 
+    // The SDK emits this system event as the application's periodic timer tick.
+    // It has no payload in InputEvent; only rawType is meaningful.
+    if (raw.type == EVENT_TIMER) {
+        event->type = EventTimer;
+        return 1;
+    }
+
     if (raw.type == EVENT_KEY) {
         event->type = EventKey;
         event->keyCode = raw.data.key.keyCode;
